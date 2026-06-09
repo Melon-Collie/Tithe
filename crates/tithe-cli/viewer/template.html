@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Tithe — match replay</title>
+  <style>
+    body { margin: 0; background: #111; color: #ddd;
+           font: 14px system-ui, sans-serif;
+           display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    #hud { padding: 10px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+    canvas { background: #1b1b1b; border: 1px solid #333; }
+    button, input { font: inherit; }
+    .t0 { color: #e8643c; font-weight: 600; }
+    .t1 { color: #4c9be8; font-weight: 600; }
+    #winner { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <button id="play">⏸ Pause</button>
+    <label>speed <input id="speed" type="range" min="1" max="16" value="4" /></label>
+    <span id="score"></span>
+    <span id="tick"></span>
+    <span id="winner"></span>
+  </div>
+  <input id="scrub" type="range" min="0" value="0" style="width: 920px" />
+  <canvas id="c" width="920" height="600"></canvas>
+  <script>
+    const MATCH = __MATCH_DATA__;
+    const cv = document.getElementById('c');
+    const ctx = cv.getContext('2d');
+    const A = MATCH.arena, frames = MATCH.frames, meta = MATCH.agents;
+
+    const margin = 40;
+    const scale = Math.min(
+      (cv.width - 2 * margin) / (A.half_x * 2),
+      (cv.height - 2 * margin) / (A.half_y * 2)
+    );
+    const sx = x => cv.width / 2 + x * scale;
+    const sy = y => cv.height / 2 - y * scale;
+    const teamColor = t => (t === 0 ? '#e8643c' : '#4c9be8');
+
+    const speedEl = document.getElementById('speed');
+    const scrub = document.getElementById('scrub');
+    const playBtn = document.getElementById('play');
+    scrub.max = frames.length - 1;
+
+    let idx = 0, playing = true, acc = 0, last = performance.now();
+
+    function drawArena() {
+      ctx.fillStyle = '#1b1b1b';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.strokeStyle = '#444'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(cv.width / 2, cv.height / 2, A.half_x * scale, A.half_y * scale, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(cv.width / 2, sy(A.half_y)); ctx.lineTo(cv.width / 2, sy(-A.half_y)); ctx.stroke();
+      for (const [gx, team] of [[-A.goal_x, 0], [A.goal_x, 1]]) {
+        ctx.strokeStyle = teamColor(team); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(sx(gx), sy(0), 11, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+
+    function drawFrame(f) {
+      drawArena();
+      for (let i = 0; i < f.agents.length; i++) {
+        const a = f.agents[i], m = meta[i];
+        ctx.globalAlpha = a.stagger ? 0.3 : 1;
+        ctx.fillStyle = teamColor(m.team);
+        ctx.beginPath(); ctx.arc(sx(a.x), sy(a.y), 6, 0, Math.PI * 2); ctx.fill();
+        if (f.carrier === m.id) {
+          ctx.globalAlpha = 1; ctx.strokeStyle = '#ffd84a'; ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.arc(sx(a.x), sy(a.y), 10, 0, Math.PI * 2); ctx.stroke();
+        }
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#ffd84a'; ctx.shadowColor = '#ffb000'; ctx.shadowBlur = 12;
+      ctx.beginPath(); ctx.arc(sx(f.soul[0]), sy(f.soul[1]), 4, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+      if (f.scored !== undefined) {
+        ctx.fillStyle = teamColor(f.scored); ctx.globalAlpha = 0.15;
+        ctx.fillRect(0, 0, cv.width, cv.height); ctx.globalAlpha = 1;
+      }
+      document.getElementById('score').innerHTML =
+        `<span class="t0">${f.score[0]}</span> – <span class="t1">${f.score[1]}</span>`;
+      document.getElementById('tick').textContent = `tick ${f.tick}`;
+      const w = document.getElementById('winner');
+      w.innerHTML = (idx === frames.length - 1 && MATCH.winner != null)
+        ? `WINNER: <span class="t${MATCH.winner}">team ${MATCH.winner}</span>` : '';
+      scrub.value = idx;
+    }
+
+    function setPlaying(p) { playing = p; playBtn.textContent = playing ? '⏸ Pause' : '▶ Play'; }
+
+    function loop(now) {
+      const dt = now - last; last = now;
+      if (playing) {
+        acc += (dt / 1000) * 60 * (Number(speedEl.value) / 4);
+        while (acc >= 1) {
+          idx = Math.min(idx + 1, frames.length - 1); acc -= 1;
+          if (idx >= frames.length - 1) setPlaying(false);
+        }
+      }
+      drawFrame(frames[idx]);
+      requestAnimationFrame(loop);
+    }
+
+    playBtn.onclick = () => { if (idx >= frames.length - 1) idx = 0; setPlaying(!playing); };
+    scrub.oninput = () => { idx = Number(scrub.value); setPlaying(false); };
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>

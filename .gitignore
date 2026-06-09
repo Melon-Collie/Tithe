@@ -31,6 +31,10 @@ Thumbs.db
 .vscode/
 !.vscode/extensions.json
 
+# --- Generated match replays (tithe play --out) ---
+/match.html
+/*.replay.html
+
 # --- Logs ---
 *.log
 npm-debug.log*

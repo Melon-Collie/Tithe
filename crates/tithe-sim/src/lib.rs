@@ -122,6 +122,12 @@ impl Simulation {
         self.winner
     }
 
+    /// The simulation's configuration (for consumers that need arena/goal
+    /// geometry, e.g. a renderer).
+    pub fn config(&self) -> &SimConfig {
+        &self.config
+    }
+
     /// Advance one fixed timestep, returning the events emitted this tick.
     /// Once the match is over, ticking is a no-op (an empty stream).
     pub fn tick(&mut self) -> Vec<Event> {

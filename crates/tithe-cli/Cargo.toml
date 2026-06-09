@@ -1,0 +1,21 @@
+[package]
+name = "tithe-cli"
+description = "Consumers of the tithe-sim event stream: an HTML match replay and a headless AI-vs-AI stats batch for tuning."
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "tithe"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+# A consumer, not the sim core — serialization and floats live here, at the
+# render boundary, never in tithe-sim.
+tithe-sim = { path = "../tithe-sim" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
