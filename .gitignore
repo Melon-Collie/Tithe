@@ -1,19 +1,36 @@
-# OS / editor
+# --- Rust ---
+# Build output (sim core, any crate). Cargo.lock IS committed (this builds apps/binaries).
+/target/
+**/target/
+# Backtrace/debug artifacts
+*.pdb
+
+# --- Tauri ---
+# Tauri's Rust build output lives under its own target dir
+/src-tauri/target/
+
+# --- Web front end (Node) ---
+node_modules/
+dist/
+build/
+out/
+.svelte-kit/
+.vite/
+*.tsbuildinfo
+
+# --- Env / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- OS / editor ---
 .DS_Store
 Thumbs.db
 *.swp
 .idea/
 .vscode/
+!.vscode/extensions.json
 
-# Logs
+# --- Logs ---
 *.log
-
-# Env / secrets
-.env
-.env.*
-!.env.example
-
-# Build output
-dist/
-build/
-out/
+npm-debug.log*
