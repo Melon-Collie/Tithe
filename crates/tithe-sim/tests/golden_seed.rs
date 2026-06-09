@@ -2,7 +2,7 @@
 //! determinism anchor (CLAUDE.md → Determinism rules). An unexpected change to
 //! any assertion here is a determinism break until proven otherwise.
 
-use tithe_sim::{Event, Rng, Simulation};
+use tithe_sim::{Rng, Simulation};
 
 /// Published SplitMix64 reference vectors for seed 0 (Vigna's `splitmix64.c`).
 /// These pin our generator byte-for-byte against the canonical algorithm.
@@ -44,8 +44,25 @@ fn rng_below_stays_in_bounds() {
 fn simulation_is_reproducible() {
     let run = |seed| {
         let mut sim = Simulation::new(seed);
-        (0..100).flat_map(|_| sim.tick()).collect::<Vec<Event>>()
+        let mut stream = Vec::new();
+        for _ in 0..200 {
+            stream.extend(sim.tick());
+        }
+        stream
     };
-    assert_eq!(run(42), run(42));
-    assert_eq!(run(42).len(), 100);
+    // Same seed → identical event stream; different seed → different scatter.
+    assert_eq!(run(123), run(123));
+    assert_ne!(run(123), run(456));
+}
+
+#[test]
+fn agents_converge_to_their_anchors() {
+    let mut sim = Simulation::new(7);
+    for _ in 0..2000 {
+        sim.tick();
+    }
+    // Snap-on-arrival means a converged agent sits exactly on its target.
+    for agent in sim.agents() {
+        assert_eq!(agent.pos, agent.target);
+    }
 }

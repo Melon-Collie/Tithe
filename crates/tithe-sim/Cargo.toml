@@ -10,5 +10,8 @@ publish = false
 workspace = true
 
 [dependencies]
-# Intentionally empty. The sim core stays dependency-light and rendering-free;
-# add a crate only with a determinism/review justification (CLAUDE.md → Stack).
+# Deterministic fixed-point arithmetic (Q16.16 via I16F16). Integer-only, so
+# it is bit-stable across native and WASM — the foundation of the determinism
+# contract. Chosen over hand-rolled math: battle-tested, minimal deps (typenum),
+# WASM-ready, and easier to audit. (CLAUDE.md → Determinism rules / Stack.)
+fixed = "1"

@@ -16,30 +16,33 @@
 //!   ambient RNG, no I/O, no global state inside simulation.
 //! - **All randomness is seeded and threaded explicitly** ([`Rng`]). Never a
 //!   global or thread-local RNG.
-//! - **No floats** — continuous quantities use fixed-point / integer math.
-//!   Floats appear only at the front-end/render boundary, never here. The
+//! - **No floats** — continuous quantities use fixed-point ([`fx`]). Floats
+//!   appear only at the front-end/render boundary, never here. The
 //!   `clippy::float_arithmetic` deny below enforces this structurally.
 //! - **Iteration order is explicit and deterministic** — ordered collections
-//!   (`BTreeMap`/`Vec`) or sort-before-iterate; never let `HashMap` iteration
+//!   (`Vec`/`BTreeMap`) or sort-before-iterate; never let `HashMap` iteration
 //!   order leak into the event stream.
 //!
-//! ## Status
+//! ## Status (Slice 1 — substrate)
 //!
-//! Scaffold. The fixed-timestep tick loop, the two-timescale agent model (§2),
-//! and the sport rules (§1) are **not implemented yet** — the attribute list,
-//! sport geometry, and much else are deliberately open (design doc §13). What
-//! exists today is the crate skeleton, a deterministic RNG, the event-stream
-//! type, and the golden-seed test harness.
+//! What exists: fixed-point math, the two-clock tick loop, and agents holding
+//! field-relative formation anchors, emitting positions to the event stream.
+//! What's still open: the soul, possession, the strip verb, scoring, and the
+//! utility-scored decision model (design doc §1, §2; much is open in §13).
 
 // Determinism guards specific to the sim core (front-end Rust crates, if any,
 // would legitimately use floats, so these are not workspace-wide).
 #![deny(clippy::float_arithmetic, clippy::float_cmp)]
 
 pub mod event;
+pub mod fx;
 pub mod rng;
+pub mod world;
 
 pub use event::Event;
+pub use fx::{Fx, Vec2, WideFx};
 pub use rng::Rng;
+pub use world::{Agent, Formation, SimConfig};
 
 /// Opaque seed for a simulation run. Same seed + same inputs → same event
 /// stream, on every platform and every replay.
@@ -47,24 +50,30 @@ pub type Seed = u64;
 
 /// A headless, deterministic simulation.
 ///
-/// Inputs go in, an event stream comes out (see [`Simulation::tick`]). This is
-/// a scaffold: the body advances a fixed-timestep clock and touches the RNG so
-/// the determinism harness has something real to pin, but the agent model and
-/// sport rules are not built yet.
+/// Inputs go in, an event stream comes out (see [`Simulation::tick`]). Slice 1
+/// runs the two-clock loop over agents that hold their formation anchors.
 #[derive(Debug, Clone)]
 pub struct Simulation {
     seed: Seed,
-    rng: Rng,
     tick: u64,
+    config: SimConfig,
+    formation: Formation,
+    agents: Vec<Agent>,
 }
 
 impl Simulation {
-    /// Start a fresh run from `seed`.
+    /// Start a fresh run from `seed`, using the default config and formation.
     pub fn new(seed: Seed) -> Self {
+        let config = SimConfig::default();
+        let formation = Formation::default_seven();
+        let mut rng = Rng::new(seed);
+        let agents = world::scatter_agents(&mut rng, &formation, &config);
         Self {
             seed,
-            rng: Rng::new(seed),
             tick: 0,
+            config,
+            formation,
+            agents,
         }
     }
 
@@ -78,14 +87,35 @@ impl Simulation {
         self.tick
     }
 
+    /// The agents' current state (for inspection / rendering).
+    pub fn agents(&self) -> &[Agent] {
+        &self.agents
+    }
+
     /// Advance one fixed timestep, returning the events emitted this tick.
-    ///
-    /// Placeholder body: advances the clock and draws from the RNG (reserved
-    /// for attribute-modulated perception noise, §2) so reproducibility is
-    /// already testable. Real behavior lands here as the sim is built.
     pub fn tick(&mut self) -> Vec<Event> {
         self.tick += 1;
-        let _perception_noise = self.rng.next_u64();
-        vec![Event::Tick { tick: self.tick }]
+
+        // Slow decision clock: at each window boundary, agents (re)choose their
+        // intent. In Slice 1 the intent is always "hold my formation anchor",
+        // so this is a no-op seam; real utility-scored decisions (the IAUS
+        // model, design doc §2) land here in a later slice.
+        if self.tick.is_multiple_of(self.config.decision_interval) {
+            for agent in self.agents.iter_mut() {
+                agent.target = self.formation.anchors[agent.anchor as usize];
+            }
+        }
+
+        // Fast execution clock: advance motion every tick and emit the stream.
+        let mut events = Vec::with_capacity(self.agents.len() + 1);
+        events.push(Event::Tick { tick: self.tick });
+        for (i, agent) in self.agents.iter_mut().enumerate() {
+            agent.pos = world::step_toward(agent.pos, agent.target, self.config.max_speed);
+            events.push(Event::AgentMoved {
+                agent: i as u32,
+                pos: agent.pos,
+            });
+        }
+        events
     }
 }
