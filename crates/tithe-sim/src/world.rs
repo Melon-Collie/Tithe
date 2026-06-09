@@ -2,14 +2,12 @@
 //! of agents, the soul, and the kinematics that carry an agent toward its
 //! target.
 //!
-//! Slice 3 scope: two teams contest the soul; a defender can **strip** an enemy
+//! Two teams contest the soul from a faceoff; a defender can **strip** an enemy
 //! carrier (the §1 challenge — win = clean possession, whiff = a brief
-//! stagger), and a carrier advances toward its own home goal so turnovers mean
-//! transition. No scoring yet (the offering skill-check and first-to-X land in
-//! Slice 4). Coordination lives in the formation, never in the agents.
+//! stagger), and a carrier advances toward its own home goal to offer it.
+//! Coordination lives in the formation, never in the agents.
 
-use crate::fx::{random_point_in_box, Fx, Vec2};
-use crate::rng::Rng;
+use crate::fx::{Fx, Vec2};
 
 /// Tunable simulation parameters — dials set by prototype + AI-vs-AI sim, not
 /// commitments (design doc §13), hence config rather than baked-in.
@@ -87,20 +85,22 @@ pub struct Formation {
 }
 
 impl Formation {
-    /// A placeholder ~7-player "three-band-with-spine" shape. The exact
-    /// geometry, team size, and zone banding are tuning dials (design doc §13),
-    /// not commitments — this just gives the slice a shape to hold.
+    /// A placeholder ~7-player full-court shape for team 0, **biased toward the
+    /// opponent's goal** (+x — the goal team 0 must deny): a deep safety near
+    /// its own goal, a spine contesting center, and a forward press up top.
+    /// Team 1 mirrors it across x. The exact geometry, team size, and zone
+    /// banding are tuning dials (design doc §13), not commitments.
     pub fn default_seven() -> Self {
         let p = |x: i32, y: i32| Vec2::new(Fx::from_num(x), Fx::from_num(y));
         Self {
             anchors: vec![
-                p(-30, -12),
-                p(-30, 12), // back band
-                p(0, -18),
-                p(0, 0),
-                p(0, 18), // mid spine
-                p(30, -12),
-                p(30, 12), // front band
+                p(-30, 0), // deep safety (near own goal)
+                p(-5, -15),
+                p(-5, 15), // midfield
+                p(10, 0),  // spine — contests the center soul
+                p(28, -16),
+                p(28, 0),
+                p(28, 16), // forward press (denying the opponent's goal)
             ],
         }
     }
@@ -171,27 +171,26 @@ pub fn step_toward(pos: Vec2, target: Vec2, max_step: Fx) -> Vec2 {
     }
 }
 
-/// Build both teams: team 0 from the base formation, team 1 mirrored across x.
-/// Ids are the index into the returned vec (team 0 first, then team 1).
-pub fn build_two_teams(rng: &mut Rng, base: &Formation, config: &SimConfig) -> Vec<Agent> {
+/// Build both teams in formation: team 0 from the base anchors, team 1 mirrored
+/// across x. Every agent starts *on* its anchor (a consistent faceoff for every
+/// soul — no random scatter). Ids index into the returned vec (team 0 first).
+pub fn build_two_teams(base: &Formation) -> Vec<Agent> {
     let mut agents = Vec::with_capacity(base.anchors.len() * 2);
     for &anchor in &base.anchors {
-        push_agent(&mut agents, 0, anchor, rng, config);
+        push_agent(&mut agents, 0, anchor);
     }
     for &anchor in &base.anchors {
-        let mirrored = Vec2::new(-anchor.x, anchor.y);
-        push_agent(&mut agents, 1, mirrored, rng, config);
+        push_agent(&mut agents, 1, Vec2::new(-anchor.x, anchor.y));
     }
     agents
 }
 
-fn push_agent(agents: &mut Vec<Agent>, team: u8, anchor: Vec2, rng: &mut Rng, config: &SimConfig) {
+fn push_agent(agents: &mut Vec<Agent>, team: u8, anchor: Vec2) {
     let id = agents.len() as u32;
-    let pos = random_point_in_box(rng, config.arena_half_x, config.arena_half_y);
     agents.push(Agent {
         id,
         team,
-        pos,
+        pos: anchor,
         target: anchor,
         anchor,
         stagger: 0,

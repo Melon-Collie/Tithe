@@ -76,8 +76,8 @@ impl Simulation {
         let config = SimConfig::default();
         let formation = Formation::default_seven();
         let goals = config.goals();
-        let mut rng = Rng::new(seed);
-        let agents = world::build_two_teams(&mut rng, &formation, &config);
+        let rng = Rng::new(seed);
+        let agents = world::build_two_teams(&formation);
         let soul = Soul::loose_at(Vec2::default());
         Self {
             seed,
@@ -232,20 +232,26 @@ impl Simulation {
         }
     }
 
-    /// A loose soul is claimed by the first agent (lowest id) to reach it.
+    /// Claim a loose soul. Every agent within `pickup_radius` this tick is a
+    /// candidate; the winner is drawn by the seeded RNG, so a symmetric faceoff
+    /// is a fair draw rather than an automatic lowest-id (team 0) win.
     fn claim_loose_soul(&mut self, events: &mut Vec<Event>) {
         if !self.soul.is_loose() {
             return;
         }
         let pickup_radius = self.config.pickup_radius;
-        for i in 0..self.agents.len() {
-            if self.agents[i].pos.distance_to(self.soul.pos) <= pickup_radius {
-                let id = self.agents[i].id;
-                self.soul.possession = Possession::Held(id);
-                events.push(Event::PossessionGained { agent: id });
-                break;
+        let mut reached: Vec<u32> = Vec::new();
+        for agent in &self.agents {
+            if agent.pos.distance_to(self.soul.pos) <= pickup_radius {
+                reached.push(agent.id);
             }
         }
+        if reached.is_empty() {
+            return;
+        }
+        let winner = reached[self.rng.below(reached.len() as u64) as usize];
+        self.soul.possession = Possession::Held(winner);
+        events.push(Event::PossessionGained { agent: winner });
     }
 
     /// A held soul rides with its carrier.
