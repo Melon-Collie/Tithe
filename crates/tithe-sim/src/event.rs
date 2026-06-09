@@ -22,8 +22,15 @@ pub enum Event {
     Tick { tick: u64 },
     /// An agent's position after this tick's motion.
     AgentMoved { agent: u32, pos: Vec2 },
-    /// An agent claimed the loose soul.
+    /// An agent claimed the soul — by reaching it loose, or by a winning strip.
     PossessionGained { agent: u32 },
+    /// A committed strip: `defender` lunged at `carrier`. On `success` the soul
+    /// turns over; otherwise the defender whiffs and is staggered.
+    StripAttempt {
+        defender: u32,
+        carrier: u32,
+        success: bool,
+    },
     /// The soul's position after this tick (loose, or riding its carrier).
     SoulMoved { pos: Vec2 },
 }

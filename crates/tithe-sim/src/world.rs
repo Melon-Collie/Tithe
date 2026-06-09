@@ -1,16 +1,18 @@
-//! The world the sim moves: arena/config, the coach's formation, the agents,
-//! and the kinematics that carry an agent toward its target.
+//! The world the sim moves: arena/config, the coach's formation, the two teams
+//! of agents, the soul, and the kinematics that carry an agent toward its
+//! target.
 //!
-//! Slice 1 scope: agents hold field-relative anchors and move to them. There
-//! is no soul, no possession, no decisions yet — that lands in later slices.
-//! Coordination lives in the formation (the coach's shape), never in the
-//! agents (CLAUDE.md → Committed architecture).
+//! Slice 3 scope: two teams contest the soul; a defender can **strip** an enemy
+//! carrier (the §1 challenge — win = clean possession, whiff = a brief
+//! stagger), and a carrier advances toward its own home goal so turnovers mean
+//! transition. No scoring yet (the offering skill-check and first-to-X land in
+//! Slice 4). Coordination lives in the formation, never in the agents.
 
-use crate::fx::{Fx, Vec2};
+use crate::fx::{random_point_in_box, Fx, Vec2};
 use crate::rng::Rng;
 
-/// Tunable simulation parameters. These are dials set by prototype + AI-vs-AI
-/// sim, not commitments (design doc §13) — hence config, not baked-in.
+/// Tunable simulation parameters — dials set by prototype + AI-vs-AI sim, not
+/// commitments (design doc §13), hence config rather than baked-in.
 #[derive(Debug, Clone)]
 pub struct SimConfig {
     /// Ticks between decision-clock boundaries (the slow clock). Agents commit
@@ -29,6 +31,18 @@ pub struct SimConfig {
     /// Baseline pull of holding the anchor while the soul is loose — agents
     /// whose chase urge beats this collapse on the ball; the rest hold shape.
     pub hold_base: Fx,
+    /// X-coordinate of a home goal (team 0 attacks -goal_x, team 1 +goal_x).
+    pub goal_x: Fx,
+    /// How close a defender must be to an enemy carrier to lunge for a strip.
+    pub strip_radius: Fx,
+    /// How close an enemy carrier must be before a defender breaks shape to
+    /// close it down (larger than strip_radius — close first, then lunge).
+    pub contest_range: Fx,
+    /// Percent chance (0..100) a committed strip wins clean possession;
+    /// otherwise the defender whiffs and is staggered.
+    pub strip_success_pct: u32,
+    /// Ticks a whiffed defender is staggered (beaten, can't act).
+    pub stagger_ticks: u32,
 }
 
 impl Default for SimConfig {
@@ -41,7 +55,22 @@ impl Default for SimConfig {
             pickup_radius: Fx::from_num(2),
             chase_max_dist: Fx::from_num(120),
             hold_base: Fx::from_num(15) / Fx::from_num(100), // 0.15
+            goal_x: Fx::from_num(45),
+            strip_radius: Fx::from_num(3),
+            contest_range: Fx::from_num(25),
+            strip_success_pct: 35,
+            stagger_ticks: 15,
         }
+    }
+}
+
+impl SimConfig {
+    /// The two home goals, indexed by team: team 0 attacks -x, team 1 +x.
+    pub fn goals(&self) -> [Vec2; 2] {
+        [
+            Vec2::new(-self.goal_x, Fx::from_num(0)),
+            Vec2::new(self.goal_x, Fx::from_num(0)),
+        ]
     }
 }
 
@@ -54,7 +83,7 @@ pub struct Formation {
 impl Formation {
     /// A placeholder ~7-player "three-band-with-spine" shape. The exact
     /// geometry, team size, and zone banding are tuning dials (design doc §13),
-    /// not commitments — this just gives Slice 1 a shape to hold.
+    /// not commitments — this just gives the slice a shape to hold.
     pub fn default_seven() -> Self {
         let p = |x: i32, y: i32| Vec2::new(Fx::from_num(x), Fx::from_num(y));
         Self {
@@ -71,12 +100,23 @@ impl Formation {
     }
 }
 
-/// A single agent: where it is, where it's headed, and which anchor it owns.
+/// A single agent: identity, team, where it is, where it's headed, its home
+/// anchor, and how many ticks it remains staggered (0 = active).
 #[derive(Debug, Clone)]
 pub struct Agent {
+    pub id: u32,
+    pub team: u8,
     pub pos: Vec2,
     pub target: Vec2,
-    pub anchor: u32,
+    pub anchor: Vec2,
+    pub stagger: u32,
+}
+
+impl Agent {
+    /// Whether the agent can move and act this tick (not staggered).
+    pub fn is_active(&self) -> bool {
+        self.stagger == 0
+    }
 }
 
 /// Who, if anyone, holds the soul.
@@ -125,20 +165,29 @@ pub fn step_toward(pos: Vec2, target: Vec2, max_step: Fx) -> Vec2 {
     }
 }
 
-/// Scatter `count` agents to deterministic random positions, each owning the
-/// matching anchor as its initial target.
-pub fn scatter_agents(rng: &mut Rng, formation: &Formation, config: &SimConfig) -> Vec<Agent> {
-    formation
-        .anchors
-        .iter()
-        .enumerate()
-        .map(|(i, &anchor)| {
-            let pos = crate::fx::random_point_in_box(rng, config.arena_half_x, config.arena_half_y);
-            Agent {
-                pos,
-                target: anchor,
-                anchor: i as u32,
-            }
-        })
-        .collect()
+/// Build both teams: team 0 from the base formation, team 1 mirrored across x.
+/// Ids are the index into the returned vec (team 0 first, then team 1).
+pub fn build_two_teams(rng: &mut Rng, base: &Formation, config: &SimConfig) -> Vec<Agent> {
+    let mut agents = Vec::with_capacity(base.anchors.len() * 2);
+    for &anchor in &base.anchors {
+        push_agent(&mut agents, 0, anchor, rng, config);
+    }
+    for &anchor in &base.anchors {
+        let mirrored = Vec2::new(-anchor.x, anchor.y);
+        push_agent(&mut agents, 1, mirrored, rng, config);
+    }
+    agents
+}
+
+fn push_agent(agents: &mut Vec<Agent>, team: u8, anchor: Vec2, rng: &mut Rng, config: &SimConfig) {
+    let id = agents.len() as u32;
+    let pos = random_point_in_box(rng, config.arena_half_x, config.arena_half_y);
+    agents.push(Agent {
+        id,
+        team,
+        pos,
+        target: anchor,
+        anchor,
+        stagger: 0,
+    });
 }

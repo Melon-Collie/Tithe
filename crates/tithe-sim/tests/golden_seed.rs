@@ -2,7 +2,7 @@
 //! determinism anchor (CLAUDE.md → Determinism rules). An unexpected change to
 //! any assertion here is a determinism break until proven otherwise.
 
-use tithe_sim::{Possession, Rng, Simulation};
+use tithe_sim::{Event, Possession, Rng, Simulation};
 
 /// Published SplitMix64 reference vectors for seed 0 (Vigna's `splitmix64.c`).
 /// These pin our generator byte-for-byte against the canonical algorithm.
@@ -56,15 +56,11 @@ fn simulation_is_reproducible() {
 }
 
 #[test]
-fn agents_converge_to_their_anchors() {
-    let mut sim = Simulation::new(7);
-    for _ in 0..2000 {
-        sim.tick();
-    }
-    // Once the soul is held, every agent (carrier included) holds its anchor.
-    for agent in sim.agents() {
-        assert_eq!(agent.pos, agent.target);
-    }
+fn two_teams_of_seven() {
+    let sim = Simulation::new(0);
+    assert_eq!(sim.agents().len(), 14);
+    assert_eq!(sim.agents().iter().filter(|a| a.team == 0).count(), 7);
+    assert_eq!(sim.agents().iter().filter(|a| a.team == 1).count(), 7);
 }
 
 #[test]
@@ -73,10 +69,27 @@ fn loose_soul_gets_claimed_and_carried() {
     for _ in 0..2000 {
         sim.tick();
     }
-    // The scramble resolved: someone owns the soul.
+    // Someone always owns the soul once the scramble resolves...
     let Possession::Held(carrier) = sim.soul().possession else {
-        panic!("soul should have been claimed");
+        panic!("soul should be held");
     };
-    // And a held soul rides exactly on its carrier.
+    // ...and a held soul rides exactly on its carrier.
     assert_eq!(sim.soul().pos, sim.agents()[carrier as usize].pos);
+}
+
+#[test]
+fn strips_cause_turnovers() {
+    let mut sim = Simulation::new(1);
+    let mut saw_successful_strip = false;
+    for _ in 0..5000 {
+        for event in sim.tick() {
+            if let Event::StripAttempt { success: true, .. } = event {
+                saw_successful_strip = true;
+            }
+        }
+    }
+    assert!(
+        saw_successful_strip,
+        "expected at least one successful strip over 5000 ticks"
+    );
 }
