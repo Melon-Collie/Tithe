@@ -43,6 +43,10 @@ pub struct SimConfig {
     pub strip_success_pct: u32,
     /// Ticks a whiffed defender is staggered (beaten, can't act).
     pub stagger_ticks: u32,
+    /// How close a carrier must get to its own goal to offer (touch-in score).
+    pub offering_radius: Fx,
+    /// Souls a team must bank to win the match (first-to-X).
+    pub souls_to_win: u32,
 }
 
 impl Default for SimConfig {
@@ -60,6 +64,8 @@ impl Default for SimConfig {
             contest_range: Fx::from_num(25),
             strip_success_pct: 35,
             stagger_ticks: 15,
+            offering_radius: Fx::from_num(3),
+            souls_to_win: 11,
         }
     }
 }

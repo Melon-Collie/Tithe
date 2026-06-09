@@ -23,14 +23,15 @@
 //!   (`Vec`/`BTreeMap`) or sort-before-iterate; never let `HashMap` iteration
 //!   order leak into the event stream.
 //!
-//! ## Status (Slice 3 — the defensive game)
+//! ## Status (Slice 4 — a complete match)
 //!
 //! What exists: fixed-point math, the two-clock tick loop, the utility-scored
 //! decision model, two teams contesting one soul, the strip verb (win = clean
-//! possession, whiff = stagger), turnovers, and carriers advancing toward their
-//! home goals. What's still open: the offering/scoring skill-check, first-to-X,
-//! passing, the anti-loiter aura, and player attributes (design doc §1, §4,
-//! §13).
+//! possession, whiff = stagger), turnovers, carriers advancing toward their
+//! home goals, the touch-in offering, between-souls reset, and a first-to-X
+//! winner. What's still open: cast-from-range offerings (needs the Finishing
+//! attribute), passing, the anti-loiter aura, stamina, and player attributes
+//! (design doc §1, §4, §13).
 
 // Determinism guards specific to the sim core (front-end Rust crates, if any,
 // would legitimately use floats, so these are not workspace-wide).
@@ -65,6 +66,8 @@ pub struct Simulation {
     agents: Vec<Agent>,
     soul: Soul,
     rng: Rng,
+    score: [u32; 2],
+    winner: Option<u8>,
 }
 
 impl Simulation {
@@ -84,6 +87,8 @@ impl Simulation {
             agents,
             soul,
             rng,
+            score: [0, 0],
+            winner: None,
         }
     }
 
@@ -107,8 +112,23 @@ impl Simulation {
         &self.soul
     }
 
+    /// The running score, `[team0, team1]`.
+    pub fn score(&self) -> [u32; 2] {
+        self.score
+    }
+
+    /// The winning team, once the match is over.
+    pub fn winner(&self) -> Option<u8> {
+        self.winner
+    }
+
     /// Advance one fixed timestep, returning the events emitted this tick.
+    /// Once the match is over, ticking is a no-op (an empty stream).
     pub fn tick(&mut self) -> Vec<Event> {
+        if self.winner.is_some() {
+            return Vec::new();
+        }
+
         self.tick += 1;
         let mut events = Vec::with_capacity(self.agents.len() + 4);
         events.push(Event::Tick { tick: self.tick });
@@ -124,7 +144,12 @@ impl Simulation {
         self.advance_motion(&mut events);
         self.claim_loose_soul(&mut events);
         self.carry_soul();
-        events.push(Event::SoulMoved { pos: self.soul.pos });
+
+        // The offering: a carrier reaching its own goal banks the soul. On the
+        // X-th soul the match ends; otherwise a fresh soul begins.
+        if !self.attempt_offering(&mut events) {
+            events.push(Event::SoulMoved { pos: self.soul.pos });
+        }
         events
     }
 
@@ -221,6 +246,47 @@ impl Simulation {
     fn carry_soul(&mut self) {
         if let Possession::Held(id) = self.soul.possession {
             self.soul.pos = self.agents[id as usize].pos;
+        }
+    }
+
+    /// Touch-in offering: if the carrier has reached its own goal, bank the
+    /// soul. Returns `true` if this score ended the match (so the caller skips
+    /// the trailing `SoulMoved`); otherwise resets for the next soul.
+    fn attempt_offering(&mut self, events: &mut Vec<Event>) -> bool {
+        let Possession::Held(id) = self.soul.possession else {
+            return false;
+        };
+        let team = self.agents[id as usize].team;
+        let pos = self.agents[id as usize].pos;
+        if pos.distance_to(self.goals[team as usize]) > self.config.offering_radius {
+            return false;
+        }
+
+        self.score[team as usize] += 1;
+        events.push(Event::Scored {
+            team,
+            score: self.score,
+        });
+
+        if self.score[team as usize] >= self.config.souls_to_win {
+            self.winner = Some(team);
+            events.push(Event::MatchOver { winner: team });
+            return true;
+        }
+
+        self.reset_for_next_soul();
+        false
+    }
+
+    /// Reset between souls: a fresh loose soul at center, every agent back on
+    /// its anchor and recovered. (The §1 "round" boundary; in the full game
+    /// this is also the manager's substitution beat.)
+    fn reset_for_next_soul(&mut self) {
+        self.soul = Soul::loose_at(Vec2::default());
+        for agent in self.agents.iter_mut() {
+            agent.pos = agent.anchor;
+            agent.target = agent.anchor;
+            agent.stagger = 0;
         }
     }
 

@@ -2,7 +2,7 @@
 //! determinism anchor (CLAUDE.md → Determinism rules). An unexpected change to
 //! any assertion here is a determinism break until proven otherwise.
 
-use tithe_sim::{Event, Possession, Rng, Simulation};
+use tithe_sim::{Event, Rng, Simulation};
 
 /// Published SplitMix64 reference vectors for seed 0 (Vigna's `splitmix64.c`).
 /// These pin our generator byte-for-byte against the canonical algorithm.
@@ -64,17 +64,20 @@ fn two_teams_of_seven() {
 }
 
 #[test]
-fn loose_soul_gets_claimed_and_carried() {
+fn loose_soul_gets_claimed() {
     let mut sim = Simulation::new(7);
-    for _ in 0..2000 {
-        sim.tick();
+    let mut claimed = false;
+    for _ in 0..500 {
+        if sim
+            .tick()
+            .iter()
+            .any(|e| matches!(e, Event::PossessionGained { .. }))
+        {
+            claimed = true;
+            break;
+        }
     }
-    // Someone always owns the soul once the scramble resolves...
-    let Possession::Held(carrier) = sim.soul().possession else {
-        panic!("soul should be held");
-    };
-    // ...and a held soul rides exactly on its carrier.
-    assert_eq!(sim.soul().pos, sim.agents()[carrier as usize].pos);
+    assert!(claimed, "the loose soul should be claimed early");
 }
 
 #[test]
@@ -92,4 +95,31 @@ fn strips_cause_turnovers() {
         saw_successful_strip,
         "expected at least one successful strip over 5000 ticks"
     );
+}
+
+#[test]
+fn a_team_scores() {
+    let mut sim = Simulation::new(2);
+    let mut scored = false;
+    for _ in 0..20_000 {
+        if sim.tick().iter().any(|e| matches!(e, Event::Scored { .. })) {
+            scored = true;
+            break;
+        }
+    }
+    assert!(scored, "expected a touch-in score within 20000 ticks");
+}
+
+#[test]
+fn match_ends_with_a_winner() {
+    let mut sim = Simulation::new(3);
+    let mut ticks = 0;
+    while sim.winner().is_none() && ticks < 200_000 {
+        sim.tick();
+        ticks += 1;
+    }
+    let winner = sim.winner().expect("the match should reach a winner");
+    assert!(sim.score()[winner as usize] >= 11);
+    // After the match ends, ticking is inert.
+    assert!(sim.tick().is_empty());
 }

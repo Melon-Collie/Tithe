@@ -31,6 +31,11 @@ pub enum Event {
         carrier: u32,
         success: bool,
     },
+    /// A team banked a soul (touch-in offering at its own goal). `score` is the
+    /// running tally `[team0, team1]` after this score.
+    Scored { team: u8, score: [u32; 2] },
+    /// The match is over — `winner` reached the soul target first.
+    MatchOver { winner: u8 },
     /// The soul's position after this tick (loose, or riding its carrier).
     SoulMoved { pos: Vec2 },
 }
