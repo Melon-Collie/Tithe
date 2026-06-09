@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+# Shared metadata. Member crates opt in with `version.workspace = true`, etc.
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+repository = "https://github.com/Melon-Collie/Tithe"
+
+# Workspace-wide lints. Member crates opt in with `[lints] workspace = true`.
+# Determinism- and review-specific lints (e.g. banning floats) live in the
+# individual crate that needs them (see crates/tithe-sim/src/lib.rs), because
+# a future front-end Rust crate may legitimately use floats.
+[workspace.lints.rust]
+unsafe_code = "deny"

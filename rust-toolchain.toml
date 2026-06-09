@@ -1,0 +1,6 @@
+# Pin the toolchain channel so every contributor (and CI) builds the sim with
+# the same compiler — a small reproducibility win for a determinism-first
+# project. `rustup` reads this and installs the components on first use.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

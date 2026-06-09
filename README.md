@@ -15,3 +15,23 @@ Design phase — no code yet. The design is unusually complete; implementation b
 - **Distribution: deferred** — desktop-first (Tauri → Steam) is the pragmatic default; a hosted browser build stays supportable. The architecture preserves both.
 
 Development model: **AI-authored, human-directed and human-reviewed.** The stack was chosen for reviewability and machine-checkable correctness over authoring velocity (§9).
+
+## Layout
+
+A Cargo workspace; sim crates live under `crates/`.
+
+```
+crates/
+  tithe-sim/     # headless, deterministic sim core — zero rendering deps
+```
+
+## Building
+
+Requires the Rust toolchain ([rustup](https://rustup.rs/)); `rust-toolchain.toml` pins the channel.
+
+```
+cargo test     # run the sim + golden-seed determinism tests
+cargo clippy   # lints (a clean build is zero warnings)
+cargo fmt      # format
+```
+

@@ -1,0 +1,14 @@
+[package]
+name = "tithe-sim"
+description = "Headless, deterministic simulation core for Tithe. Zero rendering dependencies."
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Intentionally empty. The sim core stays dependency-light and rendering-free;
+# add a crate only with a determinism/review justification (CLAUDE.md → Stack).
