@@ -22,6 +22,13 @@ pub struct SimConfig {
     pub arena_half_x: Fx,
     /// Half-height of the arena (y half-extent).
     pub arena_half_y: Fx,
+    /// How close an agent must get to a loose soul to claim it.
+    pub pickup_radius: Fx,
+    /// Distance at which the "chase the soul" urge fades to zero.
+    pub chase_max_dist: Fx,
+    /// Baseline pull of holding the anchor while the soul is loose — agents
+    /// whose chase urge beats this collapse on the ball; the rest hold shape.
+    pub hold_base: Fx,
 }
 
 impl Default for SimConfig {
@@ -31,6 +38,9 @@ impl Default for SimConfig {
             max_speed: Fx::from_num(2),
             arena_half_x: Fx::from_num(50),
             arena_half_y: Fx::from_num(30),
+            pickup_radius: Fx::from_num(2),
+            chase_max_dist: Fx::from_num(120),
+            hold_base: Fx::from_num(15) / Fx::from_num(100), // 0.15
         }
     }
 }
@@ -67,6 +77,37 @@ pub struct Agent {
     pub pos: Vec2,
     pub target: Vec2,
     pub anchor: u32,
+}
+
+/// Who, if anyone, holds the soul.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Possession {
+    /// In open play — claimable by whoever reaches it.
+    Loose,
+    /// Carried by the agent with this id.
+    Held(u32),
+}
+
+/// The soul (the ball): a position, and who holds it.
+#[derive(Debug, Clone)]
+pub struct Soul {
+    pub pos: Vec2,
+    pub possession: Possession,
+}
+
+impl Soul {
+    /// A loose soul resting at `pos`.
+    pub fn loose_at(pos: Vec2) -> Self {
+        Self {
+            pos,
+            possession: Possession::Loose,
+        }
+    }
+
+    /// Whether the soul is in open play (not carried).
+    pub fn is_loose(&self) -> bool {
+        matches!(self.possession, Possession::Loose)
+    }
 }
 
 /// Move `pos` toward `target` by at most `max_step`, snapping on arrival.

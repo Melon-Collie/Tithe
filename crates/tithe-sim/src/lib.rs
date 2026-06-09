@@ -34,15 +34,17 @@
 // would legitimately use floats, so these are not workspace-wide).
 #![deny(clippy::float_arithmetic, clippy::float_cmp)]
 
+pub mod decide;
 pub mod event;
 pub mod fx;
 pub mod rng;
 pub mod world;
 
+pub use decide::Intent;
 pub use event::Event;
 pub use fx::{Fx, Vec2, WideFx};
 pub use rng::Rng;
-pub use world::{Agent, Formation, SimConfig};
+pub use world::{Agent, Formation, Possession, SimConfig, Soul};
 
 /// Opaque seed for a simulation run. Same seed + same inputs → same event
 /// stream, on every platform and every replay.
@@ -59,21 +61,25 @@ pub struct Simulation {
     config: SimConfig,
     formation: Formation,
     agents: Vec<Agent>,
+    soul: Soul,
 }
 
 impl Simulation {
-    /// Start a fresh run from `seed`, using the default config and formation.
+    /// Start a fresh run from `seed`, using the default config and formation,
+    /// with a loose soul at the arena's center.
     pub fn new(seed: Seed) -> Self {
         let config = SimConfig::default();
         let formation = Formation::default_seven();
         let mut rng = Rng::new(seed);
         let agents = world::scatter_agents(&mut rng, &formation, &config);
+        let soul = Soul::loose_at(Vec2::default());
         Self {
             seed,
             tick: 0,
             config,
             formation,
             agents,
+            soul,
         }
     }
 
@@ -92,23 +98,30 @@ impl Simulation {
         &self.agents
     }
 
+    /// The soul's current state (for inspection / rendering).
+    pub fn soul(&self) -> &Soul {
+        &self.soul
+    }
+
     /// Advance one fixed timestep, returning the events emitted this tick.
     pub fn tick(&mut self) -> Vec<Event> {
         self.tick += 1;
 
-        // Slow decision clock: at each window boundary, agents (re)choose their
-        // intent. In Slice 1 the intent is always "hold my formation anchor",
-        // so this is a no-op seam; real utility-scored decisions (the IAUS
-        // model, design doc §2) land here in a later slice.
-        if self.tick.is_multiple_of(self.config.decision_interval) {
+        // Slow decision clock: at the first tick and each window boundary,
+        // agents (re)choose an intent via the shared utility scorer and commit
+        // to it for the window (design doc §2). The scramble↔structured mode
+        // is emergent — it's just which intent the scorer picked.
+        if self.tick == 1 || self.tick.is_multiple_of(self.config.decision_interval) {
             for agent in self.agents.iter_mut() {
-                agent.target = self.formation.anchors[agent.anchor as usize];
+                let intent = decide::choose_intent(agent, &self.soul, &self.config);
+                agent.target = decide::target_for(intent, agent, &self.soul, &self.formation);
             }
         }
 
-        // Fast execution clock: advance motion every tick and emit the stream.
-        let mut events = Vec::with_capacity(self.agents.len() + 1);
+        let mut events = Vec::with_capacity(self.agents.len() + 2);
         events.push(Event::Tick { tick: self.tick });
+
+        // Fast execution clock: advance every agent toward its committed target.
         for (i, agent) in self.agents.iter_mut().enumerate() {
             agent.pos = world::step_toward(agent.pos, agent.target, self.config.max_speed);
             events.push(Event::AgentMoved {
@@ -116,6 +129,24 @@ impl Simulation {
                 pos: agent.pos,
             });
         }
+
+        // A loose soul is claimed by the first agent (lowest id) to reach it.
+        if self.soul.is_loose() {
+            for (i, agent) in self.agents.iter().enumerate() {
+                if agent.pos.distance_to(self.soul.pos) <= self.config.pickup_radius {
+                    self.soul.possession = Possession::Held(i as u32);
+                    events.push(Event::PossessionGained { agent: i as u32 });
+                    break;
+                }
+            }
+        }
+
+        // A held soul rides with its carrier.
+        if let Possession::Held(id) = self.soul.possession {
+            self.soul.pos = self.agents[id as usize].pos;
+        }
+        events.push(Event::SoulMoved { pos: self.soul.pos });
+
         events
     }
 }

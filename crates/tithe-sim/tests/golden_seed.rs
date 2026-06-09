@@ -2,7 +2,7 @@
 //! determinism anchor (CLAUDE.md → Determinism rules). An unexpected change to
 //! any assertion here is a determinism break until proven otherwise.
 
-use tithe_sim::{Rng, Simulation};
+use tithe_sim::{Possession, Rng, Simulation};
 
 /// Published SplitMix64 reference vectors for seed 0 (Vigna's `splitmix64.c`).
 /// These pin our generator byte-for-byte against the canonical algorithm.
@@ -61,8 +61,22 @@ fn agents_converge_to_their_anchors() {
     for _ in 0..2000 {
         sim.tick();
     }
-    // Snap-on-arrival means a converged agent sits exactly on its target.
+    // Once the soul is held, every agent (carrier included) holds its anchor.
     for agent in sim.agents() {
         assert_eq!(agent.pos, agent.target);
     }
+}
+
+#[test]
+fn loose_soul_gets_claimed_and_carried() {
+    let mut sim = Simulation::new(7);
+    for _ in 0..2000 {
+        sim.tick();
+    }
+    // The scramble resolved: someone owns the soul.
+    let Possession::Held(carrier) = sim.soul().possession else {
+        panic!("soul should have been claimed");
+    };
+    // And a held soul rides exactly on its carrier.
+    assert_eq!(sim.soul().pos, sim.agents()[carrier as usize].pos);
 }

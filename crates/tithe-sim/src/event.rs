@@ -22,4 +22,8 @@ pub enum Event {
     Tick { tick: u64 },
     /// An agent's position after this tick's motion.
     AgentMoved { agent: u32, pos: Vec2 },
+    /// An agent claimed the loose soul.
+    PossessionGained { agent: u32 },
+    /// The soul's position after this tick (loose, or riding its carrier).
+    SoulMoved { pos: Vec2 },
 }
