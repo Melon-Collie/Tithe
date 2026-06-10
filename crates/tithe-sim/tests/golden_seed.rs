@@ -101,7 +101,7 @@ fn loose_soul_gets_claimed() {
         if sim
             .tick()
             .iter()
-            .any(|e| matches!(e, Event::PossessionGained { .. }))
+            .any(|e| matches!(e, Event::SoulClaimed { .. }))
         {
             claimed = true;
             break;

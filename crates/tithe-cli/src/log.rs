@@ -29,6 +29,8 @@ pub fn run(args: &[String]) {
 /// A play-by-play line for a notable event, or `None` to filter it out.
 fn describe(event: &Event) -> Option<String> {
     match event {
+        Event::NewSoul => Some("──────── new soul ────────".to_string()),
+        Event::SoulClaimed { agent } => Some(format!("P{agent} claims the loose soul")),
         Event::PassMade { from, to, chance } => Some(format!("P{from} → P{to} ({chance}%)")),
         Event::PassIntercepted { by } => Some(format!("    ...intercepted by P{by}!")),
         Event::StripAttempt {

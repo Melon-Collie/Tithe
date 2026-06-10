@@ -150,6 +150,9 @@ impl Simulation {
         self.tick += 1;
         let mut events = Vec::with_capacity(self.agents.len() + 4);
         events.push(Event::Tick { tick: self.tick });
+        if self.tick == 1 {
+            events.push(Event::NewSoul); // the opening kickoff
+        }
 
         // Slow decision clock: at the first tick and each window boundary,
         // agents (re)choose an intent and commit to it; committed lunges for
@@ -377,7 +380,7 @@ impl Simulation {
         }
         let winner = reached[self.rng.below(reached.len() as u64) as usize];
         self.soul.possession = Possession::Held(winner);
-        events.push(Event::PossessionGained { agent: winner });
+        events.push(Event::SoulClaimed { agent: winner });
     }
 
     /// A held soul rides with its carrier.
@@ -598,6 +601,7 @@ impl Simulation {
                 return true;
             }
             self.reset_for_next_soul();
+            events.push(Event::NewSoul);
         } else {
             // The fire rejects it — spit the soul back into open play, away from
             // the goal so there's no cheap put-back.

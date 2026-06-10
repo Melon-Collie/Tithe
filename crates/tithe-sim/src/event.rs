@@ -20,6 +20,11 @@ use crate::fx::Vec2;
 pub enum Event {
     /// A fixed-timestep tick advanced. `tick` is the 1-based tick index.
     Tick { tick: u64 },
+    /// A fresh soul has begun — the opening kickoff or after a score.
+    NewSoul,
+    /// An agent claimed a *loose* soul — the faceoff draw or a rebound recovery
+    /// (distinct from a pass catch or a strip, which are turnovers).
+    SoulClaimed { agent: u32 },
     /// An agent's position after this tick's motion.
     AgentMoved { agent: u32, pos: Vec2 },
     /// An agent claimed the soul — by reaching it loose, or by a winning strip.
