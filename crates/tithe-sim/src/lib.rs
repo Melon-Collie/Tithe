@@ -23,15 +23,17 @@
 //!   (`Vec`/`BTreeMap`) or sort-before-iterate; never let `HashMap` iteration
 //!   order leak into the event stream.
 //!
-//! ## Status (Phase A complete — a playable sport)
+//! ## Status (a playable sport with contested scoring)
 //!
 //! What exists: fixed-point math, the two-clock tick loop, the utility decision
 //! model with a shared value field and value-driven off-ball positioning, two
 //! teams, a faceoff draw (nearest contests), the strip verb (win/whiff/stagger),
 //! turnovers, passing with in-flight interception, stamina, agent separation,
-//! the touch-in offering, between-souls reset, and a first-to-X winner. What's
-//! still open: cast-from-range offerings (needs the Finishing attribute), the
-//! anti-loiter aura, and player attributes (design doc §1, §4, §13).
+//! per-player attributes (Finishing/Stripping/Contesting, uniform for now), the
+//! offering as a wind-up skill check (Finishing-gated, contestable, miss →
+//! rebound), and a first-to-X winner. What's still open: per-player attribute
+//! variation + generation, the anti-loiter aura, and phase-conditioned (with/
+//! without ball) formations (design doc §1, §3, §4, §13).
 
 // Determinism guards specific to the sim core (front-end Rust crates, if any,
 // would legitimately use floats, so these are not workspace-wide).
@@ -54,6 +56,13 @@ pub use world::{Agent, Formation, Possession, SimConfig, Soul};
 /// stream, on every platform and every replay.
 pub type Seed = u64;
 
+/// An offering in progress: which agent is winding up, and ticks left to resolve.
+#[derive(Debug, Clone, Copy)]
+struct OfferState {
+    carrier: u32,
+    ticks_left: u32,
+}
+
 /// A headless, deterministic simulation.
 ///
 /// Inputs go in, an event stream comes out (see [`Simulation::tick`]). Slice 3
@@ -69,6 +78,7 @@ pub struct Simulation {
     rng: Rng,
     score: [u32; 2],
     winner: Option<u8>,
+    offering: Option<OfferState>,
 }
 
 impl Simulation {
@@ -90,6 +100,7 @@ impl Simulation {
             rng,
             score: [0, 0],
             winner: None,
+            offering: None,
         }
     }
 
@@ -145,8 +156,12 @@ impl Simulation {
         // the strip also resolve here (a strip is a deliberate commitment).
         if self.tick == 1 || self.tick.is_multiple_of(self.config.decision_interval) {
             self.run_decisions();
-            self.resolve_strips(&mut events);
-            self.resolve_pass(&mut events);
+            // While an offering is winding up, the carrier is committed — defense
+            // harries the offer (not a strip) and there's no pass.
+            if self.offering.is_none() {
+                self.resolve_strips(&mut events);
+                self.resolve_pass(&mut events);
+            }
         }
 
         self.advance_motion();
@@ -161,9 +176,10 @@ impl Simulation {
         self.claim_loose_soul(&mut events);
         self.carry_soul();
 
-        // The offering: a carrier reaching its own goal banks the soul. On the
-        // X-th soul the match ends; otherwise a fresh soul begins.
-        if !self.attempt_offering(&mut events) {
+        // The offering: a carrier at its goal winds up, then resolves as a
+        // skill check. A score on the X-th soul ends the match; a miss spits the
+        // soul back into play.
+        if !self.update_offering(&mut events) {
             events.push(Event::SoulMoved { pos: self.soul.pos });
         }
         events
@@ -466,32 +482,84 @@ impl Simulation {
         }
     }
 
-    /// Touch-in offering: if the carrier has reached its own goal, bank the
-    /// soul. Returns `true` if this score ended the match (so the caller skips
-    /// the trailing `SoulMoved`); otherwise resets for the next soul.
-    fn attempt_offering(&mut self, events: &mut Vec<Event>) -> bool {
-        let Possession::Held(id) = self.soul.possession else {
-            return false;
-        };
-        let team = self.agents[id as usize].team;
-        let pos = self.agents[id as usize].pos;
-        if pos.distance_to(self.goals[team as usize]) > self.config.offering_radius {
-            return false;
+    /// Drive the offering: start one when a carrier reaches its goal, count the
+    /// wind-up down, and resolve it as a skill check. Returns `true` if a score
+    /// ended the match (so the caller skips the trailing `SoulMoved`).
+    fn update_offering(&mut self, events: &mut Vec<Event>) -> bool {
+        if let Some(state) = self.offering {
+            if state.ticks_left > 1 {
+                self.offering = Some(OfferState {
+                    ticks_left: state.ticks_left - 1,
+                    ..state
+                });
+                return false;
+            }
+            return self.resolve_offering(state.carrier, events);
         }
 
-        self.score[team as usize] += 1;
-        events.push(Event::Scored {
-            team,
-            score: self.score,
-        });
-
-        if self.score[team as usize] >= self.config.souls_to_win {
-            self.winner = Some(team);
-            events.push(Event::MatchOver { winner: team });
-            return true;
+        // Not offering yet: begin one if a carrier has reached its own goal.
+        if let Possession::Held(id) = self.soul.possession {
+            let team = self.agents[id as usize].team;
+            let at_goal = self.agents[id as usize]
+                .pos
+                .distance_to(self.goals[team as usize])
+                <= self.config.offering_radius;
+            if at_goal {
+                self.offering = Some(OfferState {
+                    carrier: id,
+                    ticks_left: self.config.offering_windup,
+                });
+                events.push(Event::OfferingStarted { carrier: id });
+            }
         }
+        false
+    }
 
-        self.reset_for_next_soul();
+    /// Resolve a finished wind-up: success = (base + Finishing×gain) × (1 −
+    /// contest), where contest sums the Contesting of enemies who arrived within
+    /// range. A score may end the match; a miss spits the soul back into play.
+    fn resolve_offering(&mut self, carrier_id: u32, events: &mut Vec<Event>) -> bool {
+        self.offering = None;
+        let team = self.agents[carrier_id as usize].team;
+        let carrier_pos = self.agents[carrier_id as usize].pos;
+        let finishing = self.agents[carrier_id as usize].attributes.finishing;
+
+        let mut contest = Fx::from_num(0);
+        for agent in &self.agents {
+            if agent.team != team
+                && agent.is_active()
+                && agent.pos.distance_to(carrier_pos) <= self.config.offering_contest_radius
+            {
+                contest += agent.attributes.contesting;
+            }
+        }
+        let contest = contest.min(self.config.offering_contest_max);
+        let raw = self.config.offering_base + finishing * self.config.offering_finish_gain;
+        let prob = (raw * (Fx::from_num(1) - contest)).clamp(Fx::from_num(0), Fx::from_num(1));
+        let success_pct = (prob * Fx::from_num(100)).to_num::<u64>();
+
+        if self.rng.below(100) < success_pct {
+            self.score[team as usize] += 1;
+            events.push(Event::Scored {
+                team,
+                score: self.score,
+            });
+            if self.score[team as usize] >= self.config.souls_to_win {
+                self.winner = Some(team);
+                events.push(Event::MatchOver { winner: team });
+                return true;
+            }
+            self.reset_for_next_soul();
+        } else {
+            // The fire rejects it — spit the soul back into open play, away from
+            // the goal so there's no cheap put-back.
+            events.push(Event::OfferingMissed {
+                carrier: carrier_id,
+            });
+            let goal = self.goals[team as usize];
+            let outward = (Vec2::default() - goal).clamp_len(self.config.rebound_distance);
+            self.soul = Soul::loose_at(goal + outward);
+        }
         false
     }
 
@@ -500,6 +568,7 @@ impl Simulation {
     /// this is also the manager's substitution beat.)
     fn reset_for_next_soul(&mut self) {
         self.soul = Soul::loose_at(Vec2::default());
+        self.offering = None;
         for agent in self.agents.iter_mut() {
             agent.pos = agent.anchor;
             agent.target = agent.anchor;

@@ -35,8 +35,13 @@ pub enum Event {
     PassMade { from: u32, to: u32 },
     /// An enemy picked off a pass in flight (a turnover).
     PassIntercepted { by: u32 },
-    /// A team banked a soul (touch-in offering at its own goal). `score` is the
-    /// running tally `[team0, team1]` after this score.
+    /// A carrier reached its goal and began an offering (the wind-up).
+    OfferingStarted { carrier: u32 },
+    /// An offering was rejected — the soul is spat back into open play (no
+    /// cheap put-back; a fresh scramble).
+    OfferingMissed { carrier: u32 },
+    /// A team banked a soul (a successful offering). `score` is the running
+    /// tally `[team0, team1]` after this score.
     Scored { team: u8, score: [u32; 2] },
     /// The match is over — `winner` reached the soul target first.
     MatchOver { winner: u8 },

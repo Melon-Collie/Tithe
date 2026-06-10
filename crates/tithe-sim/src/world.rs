@@ -39,8 +39,20 @@ pub struct SimConfig {
     pub strip_success_max_pct: u32,
     /// Ticks a whiffed defender is staggered (beaten, can't act).
     pub stagger_ticks: u32,
-    /// How close a carrier must get to its own goal to offer (touch-in score).
+    /// How close a carrier must get to its own goal to begin an offering.
     pub offering_radius: Fx,
+    /// Ticks an offering takes to resolve (the wind-up defenders can arrive in).
+    pub offering_windup: u32,
+    /// Base offering success (before Finishing and contest), as a fraction.
+    pub offering_base: Fx,
+    /// Extra success from the carrier's Finishing (added to base, ×finishing).
+    pub offering_finish_gain: Fx,
+    /// How close an enemy must be to harry an offering.
+    pub offering_contest_radius: Fx,
+    /// Maximum total contest (cap on summed Contesting) — leaves a slim chance.
+    pub offering_contest_max: Fx,
+    /// How far a missed offering's soul is spat back out from the goal.
+    pub rebound_distance: Fx,
     /// Souls a team must bank to win the match (first-to-X).
     pub souls_to_win: u32,
     /// Speed a passed soul travels in flight (faster than a runner).
@@ -93,6 +105,12 @@ impl Default for SimConfig {
             strip_success_max_pct: 70, // × Stripping 0.5 = the old flat 35%
             stagger_ticks: 15,
             offering_radius: Fx::from_num(3),
+            offering_windup: 8,
+            offering_base: Fx::from_num(4) / Fx::from_num(10), // 0.4
+            offering_finish_gain: Fx::from_num(5) / Fx::from_num(10), // 0.5 → finishing 0.5 ⇒ 0.65 base
+            offering_contest_radius: Fx::from_num(7),
+            offering_contest_max: Fx::from_num(9) / Fx::from_num(10), // 0.9
+            rebound_distance: Fx::from_num(20),
             souls_to_win: 11,
             pass_speed: Fx::from_num(8),
             pass_max_dist: Fx::from_num(40),

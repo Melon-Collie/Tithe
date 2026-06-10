@@ -21,6 +21,8 @@ pub fn run(args: &[String]) {
     let mut strip_wins = 0u64;
     let mut passes = 0u64;
     let mut intercepts = 0u64;
+    let mut offers = 0u64;
+    let mut offers_missed = 0u64;
 
     for m in 0..matches {
         let mut sim = Simulation::new(base_seed.wrapping_add(u64::from(m)));
@@ -36,6 +38,8 @@ pub fn run(args: &[String]) {
                     }
                     Event::PassMade { .. } => passes += 1,
                     Event::PassIntercepted { .. } => intercepts += 1,
+                    Event::OfferingStarted { .. } => offers += 1,
+                    Event::OfferingMissed { .. } => offers_missed += 1,
                     _ => {}
                 }
             }
@@ -71,5 +75,10 @@ pub fn run(args: &[String]) {
         "Passes / match:     {:.1} ({:.0}% intercepted)",
         passes as f64 / n,
         100.0 * intercepts as f64 / passes.max(1) as f64
+    );
+    println!(
+        "Offers / match:     {:.1} ({:.0}% scored)",
+        offers as f64 / n,
+        100.0 * (offers - offers_missed) as f64 / offers.max(1) as f64
     );
 }

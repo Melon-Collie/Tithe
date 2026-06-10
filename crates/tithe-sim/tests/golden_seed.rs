@@ -195,6 +195,26 @@ fn a_team_scores() {
 }
 
 #[test]
+fn offerings_can_miss() {
+    let mut sim = Simulation::new(2);
+    let mut missed = false;
+    for _ in 0..20_000 {
+        if sim
+            .tick()
+            .iter()
+            .any(|e| matches!(e, Event::OfferingMissed { .. }))
+        {
+            missed = true;
+            break;
+        }
+    }
+    assert!(
+        missed,
+        "scoring should not be guaranteed — offerings can miss"
+    );
+}
+
+#[test]
 fn match_ends_with_a_winner() {
     let mut sim = Simulation::new(3);
     let mut ticks = 0;
