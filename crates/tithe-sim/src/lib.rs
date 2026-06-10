@@ -212,7 +212,7 @@ impl Simulation {
     /// for this window); a whiff staggers the defender.
     fn resolve_strips(&mut self, events: &mut Vec<Event>) {
         let strip_radius = self.config.strip_radius;
-        let success_pct = u64::from(self.config.strip_success_pct);
+        let strip_max = Fx::from_num(self.config.strip_success_max_pct);
         let stagger_ticks = self.config.stagger_ticks;
 
         for i in 0..self.agents.len() {
@@ -232,6 +232,8 @@ impl Simulation {
             }
 
             let defender_id = self.agents[i].id;
+            // Strip-win chance scales with the defender's Stripping attribute.
+            let success_pct = (self.agents[i].attributes.stripping * strip_max).to_num::<u64>();
             if self.rng.below(100) < success_pct {
                 self.soul.possession = Possession::Held(defender_id);
                 self.soul.pos = self.agents[i].pos;

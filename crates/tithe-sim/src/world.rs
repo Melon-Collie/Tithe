@@ -34,9 +34,9 @@ pub struct SimConfig {
     /// How close an enemy carrier must be before a defender breaks shape to
     /// close it down (larger than strip_radius — close first, then lunge).
     pub contest_range: Fx,
-    /// Percent chance (0..100) a committed strip wins clean possession;
-    /// otherwise the defender whiffs and is staggered.
-    pub strip_success_pct: u32,
+    /// Strip-win percent (0..100) of a maxed-Stripping defender; the actual
+    /// chance scales with the defender's Stripping attribute.
+    pub strip_success_max_pct: u32,
     /// Ticks a whiffed defender is staggered (beaten, can't act).
     pub stagger_ticks: u32,
     /// How close a carrier must get to its own goal to offer (touch-in score).
@@ -90,7 +90,7 @@ impl Default for SimConfig {
             goal_x: Fx::from_num(45),
             strip_radius: Fx::from_num(3),
             contest_range: Fx::from_num(25),
-            strip_success_pct: 35,
+            strip_success_max_pct: 70, // × Stripping 0.5 = the old flat 35%
             stagger_ticks: 15,
             offering_radius: Fx::from_num(3),
             souls_to_win: 11,
@@ -151,9 +151,33 @@ impl Formation {
     }
 }
 
+/// Per-player capabilities. A stat exists only because some sim step consumes
+/// it (§4): `finishing` → offering success; `stripping` → strip-the-carrier
+/// success; `contesting` → pass interception + offering contest (and the lane
+/// area a defender covers). All in `[0, 1]`.
+#[derive(Debug, Clone, Copy)]
+pub struct Attributes {
+    pub finishing: Fx,
+    pub stripping: Fx,
+    pub contesting: Fx,
+}
+
+impl Attributes {
+    /// Every player identical and mid-range — differentiation (generation,
+    /// scouting) comes later.
+    pub fn uniform() -> Self {
+        let mid = Fx::from_num(1) / Fx::from_num(2); // 0.5
+        Self {
+            finishing: mid,
+            stripping: mid,
+            contesting: mid,
+        }
+    }
+}
+
 /// A single agent: identity, team, where it is, where it's headed, its home
-/// anchor, how many ticks it remains staggered (0 = active), and its stamina
-/// (1 = fresh, draining over a soul).
+/// anchor, how many ticks it remains staggered (0 = active), its stamina
+/// (1 = fresh, draining over a soul), and its attributes.
 #[derive(Debug, Clone)]
 pub struct Agent {
     pub id: u32,
@@ -163,6 +187,7 @@ pub struct Agent {
     pub anchor: Vec2,
     pub stagger: u32,
     pub stamina: Fx,
+    pub attributes: Attributes,
 }
 
 impl Agent {
@@ -244,5 +269,6 @@ fn push_agent(agents: &mut Vec<Agent>, team: u8, anchor: Vec2) {
         anchor,
         stagger: 0,
         stamina: Fx::from_num(1),
+        attributes: Attributes::uniform(),
     });
 }
