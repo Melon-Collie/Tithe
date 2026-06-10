@@ -115,6 +115,26 @@ fn passes_happen() {
 }
 
 #[test]
+fn passes_get_intercepted() {
+    let mut sim = Simulation::new(1);
+    let mut intercepted = false;
+    for _ in 0..20_000 {
+        if sim
+            .tick()
+            .iter()
+            .any(|e| matches!(e, Event::PassIntercepted { .. }))
+        {
+            intercepted = true;
+            break;
+        }
+    }
+    assert!(
+        intercepted,
+        "expected a pass to be intercepted within 20000 ticks"
+    );
+}
+
+#[test]
 fn a_team_scores() {
     let mut sim = Simulation::new(2);
     let mut scored = false;

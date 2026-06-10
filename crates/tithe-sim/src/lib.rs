@@ -313,15 +313,39 @@ impl Simulation {
         }
     }
 
-    /// Advance a pass in flight. The soul homes onto the receiver (faster than a
-    /// runner, so it always arrives) and is caught within `pickup_radius`.
+    /// Advance a pass in flight. The soul homes onto the receiver; an enemy
+    /// whose body is within `intercept_radius` of the soul's path this tick
+    /// picks it off (a turnover). Otherwise the receiver catches it within
+    /// `pickup_radius`. Interception is positional — no RNG — and consistent
+    /// with the `lane_clear` the carrier already prices into a pass.
     fn advance_soul_flight(&mut self, events: &mut Vec<Event>) {
         let Possession::InFlight { to } = self.soul.possession else {
             return;
         };
+        let receiver_team = self.agents[to as usize].team;
         let target = self.agents[to as usize].pos;
-        self.soul.pos = world::step_toward(self.soul.pos, target, self.config.pass_speed);
-        if self.soul.pos.distance_to(target) <= self.config.pickup_radius {
+        let from = self.soul.pos;
+        let new_pos = world::step_toward(from, target, self.config.pass_speed);
+        self.soul.pos = new_pos;
+
+        // An enemy on the flight segment steals it (id order breaks ties).
+        let intercept_radius = self.config.intercept_radius;
+        for i in 0..self.agents.len() {
+            if self.agents[i].team == receiver_team || !self.agents[i].is_active() {
+                continue;
+            }
+            if fx::point_to_segment_distance(self.agents[i].pos, from, new_pos) <= intercept_radius
+            {
+                let by = self.agents[i].id;
+                self.soul.possession = Possession::Held(by);
+                self.soul.pos = self.agents[i].pos;
+                events.push(Event::PassIntercepted { by });
+                events.push(Event::PossessionGained { agent: by });
+                return;
+            }
+        }
+
+        if new_pos.distance_to(target) <= self.config.pickup_radius {
             self.soul.possession = Possession::Held(to);
             events.push(Event::PossessionGained { agent: to });
         }

@@ -59,6 +59,8 @@ pub struct SimConfig {
     pub pressure_max: Fx,
     /// Perpendicular distance within which a defender blocks a pass lane.
     pub lane_radius: Fx,
+    /// Distance from the in-flight soul's path within which an enemy picks it off.
+    pub intercept_radius: Fx,
 }
 
 impl Default for SimConfig {
@@ -85,6 +87,7 @@ impl Default for SimConfig {
             pressure_radius: Fx::from_num(12),
             pressure_max: Fx::from_num(2),
             lane_radius: Fx::from_num(4),
+            intercept_radius: Fx::from_num(3),
         }
     }
 }

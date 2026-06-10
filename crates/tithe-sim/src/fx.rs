@@ -57,6 +57,27 @@ impl Vec2 {
     }
 }
 
+/// Shortest distance from point `p` to the segment `a`–`b` (endpoints clamped).
+/// Deterministic, fixed-point — the projection uses dot products, no trig.
+pub fn point_to_segment_distance(p: Vec2, a: Vec2, b: Vec2) -> Fx {
+    let ab = b - a;
+    let len_sq: WideFx = ab.x.wide_mul(ab.x) + ab.y.wide_mul(ab.y);
+    let zero = WideFx::from_num(0);
+    if len_sq <= zero {
+        return p.distance_to(a); // degenerate segment
+    }
+    let ap = p - a;
+    let dot: WideFx = ap.x.wide_mul(ab.x) + ap.y.wide_mul(ab.y);
+    let closest = if dot <= zero {
+        a
+    } else if dot >= len_sq {
+        b
+    } else {
+        a + ab.scale(Fx::saturating_from_num(dot / len_sq))
+    };
+    p.distance_to(closest)
+}
+
 impl std::ops::Add for Vec2 {
     type Output = Vec2;
 
@@ -109,6 +130,22 @@ mod tests {
         // 200² = 40000 overflows Q16.16 (±32768); wide_mul keeps it exact.
         let v = Vec2::new(Fx::from_num(200), Fx::from_num(0));
         assert!(close(v.length(), Fx::from_num(200)));
+    }
+
+    #[test]
+    fn point_to_segment_distance_basics() {
+        let a = Vec2::new(Fx::from_num(0), Fx::from_num(0));
+        let b = Vec2::new(Fx::from_num(10), Fx::from_num(0));
+        // Off the middle of the segment: perpendicular distance.
+        assert!(close(
+            point_to_segment_distance(Vec2::new(Fx::from_num(5), Fx::from_num(3)), a, b),
+            Fx::from_num(3)
+        ));
+        // Past an endpoint: distance to that endpoint.
+        assert!(close(
+            point_to_segment_distance(Vec2::new(Fx::from_num(13), Fx::from_num(0)), a, b),
+            Fx::from_num(3)
+        ));
     }
 
     #[test]

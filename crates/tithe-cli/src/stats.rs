@@ -20,6 +20,7 @@ pub fn run(args: &[String]) {
     let mut strip_attempts = 0u64;
     let mut strip_wins = 0u64;
     let mut passes = 0u64;
+    let mut intercepts = 0u64;
 
     for m in 0..matches {
         let mut sim = Simulation::new(base_seed.wrapping_add(u64::from(m)));
@@ -34,6 +35,7 @@ pub fn run(args: &[String]) {
                         }
                     }
                     Event::PassMade { .. } => passes += 1,
+                    Event::PassIntercepted { .. } => intercepts += 1,
                     _ => {}
                 }
             }
@@ -65,5 +67,9 @@ pub fn run(args: &[String]) {
         "Strips:             {strip_attempts} attempts, {strip_wins} won ({:.0}%)",
         100.0 * strip_wins as f64 / attempts
     );
-    println!("Passes / match:     {:.1}", passes as f64 / n);
+    println!(
+        "Passes / match:     {:.1} ({:.0}% intercepted)",
+        passes as f64 / n,
+        100.0 * intercepts as f64 / passes.max(1) as f64
+    );
 }
