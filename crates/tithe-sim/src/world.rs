@@ -8,6 +8,7 @@
 //! Coordination lives in the formation, never in the agents.
 
 use crate::fx::{Fx, Vec2};
+use crate::rng::Rng;
 
 /// Tunable simulation parameters — dials set by prototype + AI-vs-AI sim, not
 /// commitments (design doc §13), hence config rather than baked-in.
@@ -187,8 +188,8 @@ pub struct Attributes {
 }
 
 impl Attributes {
-    /// Every player identical and mid-range — differentiation (generation,
-    /// scouting) comes later.
+    /// Every player identical and mid-range. Kept for tests; live play uses
+    /// [`Attributes::random`].
     pub fn uniform() -> Self {
         let mid = Fx::from_num(1) / Fx::from_num(2); // 0.5
         Self {
@@ -198,6 +199,24 @@ impl Attributes {
             passing: mid,
         }
     }
+
+    /// Independent draws per attribute in `[0.25, 0.85]`, so players differ and
+    /// rough archetypes emerge (a sniper, a checker, a passer). A placeholder
+    /// for the real archetype-first, sim-validated generation (§4); deterministic
+    /// from the threaded [`Rng`].
+    pub fn random(rng: &mut Rng) -> Self {
+        Self {
+            finishing: draw_attribute(rng),
+            stripping: draw_attribute(rng),
+            contesting: draw_attribute(rng),
+            passing: draw_attribute(rng),
+        }
+    }
+}
+
+/// One attribute value, uniform in `[0.25, 0.85]` in 0.01 steps.
+fn draw_attribute(rng: &mut Rng) -> Fx {
+    Fx::from_num(25 + rng.below(61)) / Fx::from_num(100)
 }
 
 /// A single agent: identity, team, where it is, where it's headed, its home
@@ -275,18 +294,18 @@ pub fn step_toward(pos: Vec2, target: Vec2, max_step: Fx) -> Vec2 {
 /// Build both teams in formation: team 0 from the base anchors, team 1 mirrored
 /// across x. Every agent starts *on* its anchor (a consistent faceoff for every
 /// soul — no random scatter). Ids index into the returned vec (team 0 first).
-pub fn build_two_teams(base: &Formation) -> Vec<Agent> {
+pub fn build_two_teams(base: &Formation, rng: &mut Rng) -> Vec<Agent> {
     let mut agents = Vec::with_capacity(base.anchors.len() * 2);
     for &anchor in &base.anchors {
-        push_agent(&mut agents, 0, anchor);
+        push_agent(&mut agents, 0, anchor, rng);
     }
     for &anchor in &base.anchors {
-        push_agent(&mut agents, 1, Vec2::new(-anchor.x, anchor.y));
+        push_agent(&mut agents, 1, Vec2::new(-anchor.x, anchor.y), rng);
     }
     agents
 }
 
-fn push_agent(agents: &mut Vec<Agent>, team: u8, anchor: Vec2) {
+fn push_agent(agents: &mut Vec<Agent>, team: u8, anchor: Vec2, rng: &mut Rng) {
     let id = agents.len() as u32;
     agents.push(Agent {
         id,
@@ -296,6 +315,6 @@ fn push_agent(agents: &mut Vec<Agent>, team: u8, anchor: Vec2) {
         anchor,
         stagger: 0,
         stamina: Fx::from_num(1),
-        attributes: Attributes::uniform(),
+        attributes: Attributes::random(rng),
     });
 }

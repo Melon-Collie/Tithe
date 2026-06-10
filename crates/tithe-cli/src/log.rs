@@ -13,6 +13,21 @@ pub fn run(args: &[String]) {
 
     let mut sim = Simulation::new(seed);
     println!("== Tithe match log (seed {seed}) ==");
+    println!("roster (Fin/Strip/Cont/Pass, 0–99):");
+    for a in sim.agents() {
+        let at = &a.attributes;
+        let pct = |f: tithe_sim::Fx| (f * tithe_sim::Fx::from_num(100)).to_num::<u32>();
+        println!(
+            "  P{:<2} team{}  F{:>2} S{:>2} C{:>2} P{:>2}",
+            a.id,
+            a.team,
+            pct(at.finishing),
+            pct(at.stripping),
+            pct(at.contesting),
+            pct(at.passing),
+        );
+    }
+    println!();
     let mut ticks = 0;
     while sim.winner().is_none() && ticks < max_ticks {
         let events = sim.tick();

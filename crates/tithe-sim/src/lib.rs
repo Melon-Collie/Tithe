@@ -87,8 +87,8 @@ impl Simulation {
         let config = SimConfig::default();
         let formation = Formation::default_seven();
         let goals = config.goals();
-        let rng = Rng::new(seed);
-        let agents = world::build_two_teams(&formation);
+        let mut rng = Rng::new(seed);
+        let agents = world::build_two_teams(&formation, &mut rng);
         let soul = Soul::loose_at(Vec2::default());
         Self {
             seed,
