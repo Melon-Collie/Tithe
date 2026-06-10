@@ -19,17 +19,22 @@ pub fn run(args: &[String]) {
     let mut total_margin = 0u64;
     let mut strip_attempts = 0u64;
     let mut strip_wins = 0u64;
+    let mut passes = 0u64;
 
     for m in 0..matches {
         let mut sim = Simulation::new(base_seed.wrapping_add(u64::from(m)));
         let mut ticks = 0u64;
         while sim.winner().is_none() && ticks < MAX_TICKS {
             for event in sim.tick() {
-                if let Event::StripAttempt { success, .. } = event {
-                    strip_attempts += 1;
-                    if success {
-                        strip_wins += 1;
+                match event {
+                    Event::StripAttempt { success, .. } => {
+                        strip_attempts += 1;
+                        if success {
+                            strip_wins += 1;
+                        }
                     }
+                    Event::PassMade { .. } => passes += 1,
+                    _ => {}
                 }
             }
             ticks += 1;
@@ -60,4 +65,5 @@ pub fn run(args: &[String]) {
         "Strips:             {strip_attempts} attempts, {strip_wins} won ({:.0}%)",
         100.0 * strip_wins as f64 / attempts
     );
+    println!("Passes / match:     {:.1}", passes as f64 / n);
 }

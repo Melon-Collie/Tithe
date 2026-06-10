@@ -87,7 +87,8 @@ fn build_export(seed: u64, max_ticks: u64) -> MatchExport {
             soul: xy(sim.soul().pos),
             carrier: match sim.soul().possession {
                 Possession::Held(id) => Some(id),
-                Possession::Loose => None,
+                // In flight: nobody holds it (the soul dot animates between players).
+                Possession::Loose | Possession::InFlight { .. } => None,
             },
             score: sim.score(),
             agents: sim

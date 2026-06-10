@@ -41,6 +41,7 @@ pub mod decide;
 pub mod event;
 pub mod fx;
 pub mod rng;
+pub mod value;
 pub mod world;
 
 pub use decide::Intent;
@@ -145,9 +146,11 @@ impl Simulation {
         if self.tick == 1 || self.tick.is_multiple_of(self.config.decision_interval) {
             self.run_decisions();
             self.resolve_strips(&mut events);
+            self.resolve_pass(&mut events);
         }
 
         self.advance_motion(&mut events);
+        self.advance_soul_flight(&mut events);
         self.claim_loose_soul(&mut events);
         self.carry_soul();
 
@@ -261,6 +264,69 @@ impl Simulation {
         }
     }
 
+    /// The carrier may pass: launch the soul to the teammate whose value as a
+    /// receiver (goal-closeness × openness, through a clear lane) beats the
+    /// carrier's own value by `pass_value_margin`. This is the drive-and-kick —
+    /// a pressured carrier dishes to an open, better-placed teammate. Resolved
+    /// on the decision clock.
+    fn resolve_pass(&mut self, events: &mut Vec<Event>) {
+        let Possession::Held(carrier_id) = self.soul.possession else {
+            return;
+        };
+        let team = self.agents[carrier_id as usize].team;
+        let carrier_pos = self.agents[carrier_id as usize].pos;
+        let goal = self.goals[team as usize];
+        let max_dist = self.config.pass_max_dist;
+
+        let enemies: Vec<Vec2> = self
+            .agents
+            .iter()
+            .filter(|a| a.team != team)
+            .map(|a| a.pos)
+            .collect();
+
+        // A receiver must beat the carrier's own value by the margin.
+        let carrier_value = value::value_at(carrier_pos, goal, &enemies, &self.config);
+        let mut best_value = carrier_value + self.config.pass_value_margin;
+        let mut receiver: Option<u32> = None;
+        for agent in &self.agents {
+            if agent.team != team || agent.id == carrier_id || !agent.is_active() {
+                continue;
+            }
+            if carrier_pos.distance_to(agent.pos) > max_dist {
+                continue;
+            }
+            let lane = value::lane_clear(carrier_pos, agent.pos, &enemies, &self.config);
+            let score = value::value_at(agent.pos, goal, &enemies, &self.config) * lane;
+            if score > best_value {
+                best_value = score;
+                receiver = Some(agent.id);
+            }
+        }
+
+        if let Some(to) = receiver {
+            self.soul.possession = Possession::InFlight { to };
+            events.push(Event::PassMade {
+                from: carrier_id,
+                to,
+            });
+        }
+    }
+
+    /// Advance a pass in flight. The soul homes onto the receiver (faster than a
+    /// runner, so it always arrives) and is caught within `pickup_radius`.
+    fn advance_soul_flight(&mut self, events: &mut Vec<Event>) {
+        let Possession::InFlight { to } = self.soul.possession else {
+            return;
+        };
+        let target = self.agents[to as usize].pos;
+        self.soul.pos = world::step_toward(self.soul.pos, target, self.config.pass_speed);
+        if self.soul.pos.distance_to(target) <= self.config.pickup_radius {
+            self.soul.possession = Possession::Held(to);
+            events.push(Event::PossessionGained { agent: to });
+        }
+    }
+
     /// Touch-in offering: if the carrier has reached its own goal, bank the
     /// soul. Returns `true` if this score ended the match (so the caller skips
     /// the trailing `SoulMoved`); otherwise resets for the next soul.
@@ -302,18 +368,19 @@ impl Simulation {
         }
     }
 
-    /// A snapshot of the current carrier (if any), for the decision scorer.
+    /// A snapshot of the current carrier (if any), for the decision scorer. A
+    /// pass in flight counts its receiver as the carrier, so teammates support
+    /// the catch and defenders converge to contest it.
     fn carrier_info(&self) -> Option<decide::CarrierInfo> {
-        match self.soul.possession {
-            Possession::Held(id) => {
-                let carrier = &self.agents[id as usize];
-                Some(decide::CarrierInfo {
-                    id: carrier.id,
-                    team: carrier.team,
-                    pos: carrier.pos,
-                })
-            }
-            Possession::Loose => None,
-        }
+        let id = match self.soul.possession {
+            Possession::Held(id) | Possession::InFlight { to: id } => id,
+            Possession::Loose => return None,
+        };
+        let carrier = &self.agents[id as usize];
+        Some(decide::CarrierInfo {
+            id: carrier.id,
+            team: carrier.team,
+            pos: carrier.pos,
+        })
     }
 }

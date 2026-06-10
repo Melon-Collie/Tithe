@@ -98,6 +98,23 @@ fn strips_cause_turnovers() {
 }
 
 #[test]
+fn passes_happen() {
+    let mut sim = Simulation::new(2);
+    let mut passed = false;
+    for _ in 0..20_000 {
+        if sim
+            .tick()
+            .iter()
+            .any(|e| matches!(e, Event::PassMade { .. }))
+        {
+            passed = true;
+            break;
+        }
+    }
+    assert!(passed, "expected a pass within 20000 ticks");
+}
+
+#[test]
 fn a_team_scores() {
     let mut sim = Simulation::new(2);
     let mut scored = false;

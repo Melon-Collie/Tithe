@@ -45,6 +45,20 @@ pub struct SimConfig {
     pub offering_radius: Fx,
     /// Souls a team must bank to win the match (first-to-X).
     pub souls_to_win: u32,
+    /// Speed a passed soul travels in flight (faster than a runner).
+    pub pass_speed: Fx,
+    /// Maximum distance over which a carrier will attempt a pass.
+    pub pass_max_dist: Fx,
+    /// How much a receiver's value must beat the carrier's for a pass to fire.
+    pub pass_value_margin: Fx,
+    /// Distance at which goal-closeness value reaches zero (the value field's span).
+    pub value_span: Fx,
+    /// Radius within which an enemy contributes to a spot's pressure.
+    pub pressure_radius: Fx,
+    /// Enemy-count (distance-weighted) that fully smothers a spot's openness.
+    pub pressure_max: Fx,
+    /// Perpendicular distance within which a defender blocks a pass lane.
+    pub lane_radius: Fx,
 }
 
 impl Default for SimConfig {
@@ -64,6 +78,13 @@ impl Default for SimConfig {
             stagger_ticks: 15,
             offering_radius: Fx::from_num(3),
             souls_to_win: 11,
+            pass_speed: Fx::from_num(8),
+            pass_max_dist: Fx::from_num(40),
+            pass_value_margin: Fx::from_num(5) / Fx::from_num(100), // 0.05
+            value_span: Fx::from_num(90),
+            pressure_radius: Fx::from_num(12),
+            pressure_max: Fx::from_num(2),
+            lane_radius: Fx::from_num(4),
         }
     }
 }
@@ -132,6 +153,8 @@ pub enum Possession {
     Loose,
     /// Carried by the agent with this id.
     Held(u32),
+    /// A pass in flight, homing toward the agent with this id (the receiver).
+    InFlight { to: u32 },
 }
 
 /// The soul (the ball): a position, and who holds it.
