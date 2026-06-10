@@ -202,7 +202,7 @@ fn offerings_can_miss() {
         if sim
             .tick()
             .iter()
-            .any(|e| matches!(e, Event::OfferingMissed { .. }))
+            .any(|e| matches!(e, Event::OfferingResolved { scored: false, .. }))
         {
             missed = true;
             break;

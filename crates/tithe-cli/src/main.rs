@@ -11,6 +11,7 @@
 //! Floats and serialization live here at the render boundary — never in
 //! `tithe-sim`.
 
+mod log;
 mod replay;
 mod stats;
 
@@ -19,10 +20,12 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("play") => replay::run(&args[2..]),
         Some("stats") => stats::run(&args[2..]),
+        Some("log") => log::run(&args[2..]),
         _ => {
             eprintln!("usage:");
             eprintln!("  tithe play  [--seed N] [--out FILE] [--max-ticks N]");
             eprintln!("  tithe stats [--matches N] [--seed N]");
+            eprintln!("  tithe log   [--seed N] [--max-ticks N]");
             std::process::exit(2);
         }
     }

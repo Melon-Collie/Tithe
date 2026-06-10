@@ -250,12 +250,14 @@ impl Simulation {
             let defender_id = self.agents[i].id;
             // Strip-win chance scales with the defender's Stripping attribute.
             let success_pct = (self.agents[i].attributes.stripping * strip_max).to_num::<u64>();
+            let chance = success_pct as u8;
             if self.rng.below(100) < success_pct {
                 self.soul.possession = Possession::Held(defender_id);
                 self.soul.pos = self.agents[i].pos;
                 events.push(Event::StripAttempt {
                     defender: defender_id,
                     carrier: carrier_id,
+                    chance,
                     success: true,
                 });
                 events.push(Event::PossessionGained { agent: defender_id });
@@ -266,6 +268,7 @@ impl Simulation {
             events.push(Event::StripAttempt {
                 defender: defender_id,
                 carrier: carrier_id,
+                chance,
                 success: false,
             });
         }
@@ -537,8 +540,14 @@ impl Simulation {
         let raw = self.config.offering_base + finishing * self.config.offering_finish_gain;
         let prob = (raw * (Fx::from_num(1) - contest)).clamp(Fx::from_num(0), Fx::from_num(1));
         let success_pct = (prob * Fx::from_num(100)).to_num::<u64>();
+        let scored = self.rng.below(100) < success_pct;
+        events.push(Event::OfferingResolved {
+            carrier: carrier_id,
+            chance: success_pct as u8,
+            scored,
+        });
 
-        if self.rng.below(100) < success_pct {
+        if scored {
             self.score[team as usize] += 1;
             events.push(Event::Scored {
                 team,
@@ -553,9 +562,6 @@ impl Simulation {
         } else {
             // The fire rejects it — spit the soul back into open play, away from
             // the goal so there's no cheap put-back.
-            events.push(Event::OfferingMissed {
-                carrier: carrier_id,
-            });
             let goal = self.goals[team as usize];
             let outward = (Vec2::default() - goal).clamp_len(self.config.rebound_distance);
             self.soul = Soul::loose_at(goal + outward);

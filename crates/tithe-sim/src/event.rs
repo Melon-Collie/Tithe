@@ -24,11 +24,13 @@ pub enum Event {
     AgentMoved { agent: u32, pos: Vec2 },
     /// An agent claimed the soul — by reaching it loose, or by a winning strip.
     PossessionGained { agent: u32 },
-    /// A committed strip: `defender` lunged at `carrier`. On `success` the soul
-    /// turns over; otherwise the defender whiffs and is staggered.
+    /// A committed strip: `defender` lunged at `carrier` with a `chance`% to win.
+    /// On `success` the soul turns over; otherwise the defender whiffs and is
+    /// staggered.
     StripAttempt {
         defender: u32,
         carrier: u32,
+        chance: u8,
         success: bool,
     },
     /// A carrier launched a pass (flame arc) toward a teammate.
@@ -37,9 +39,13 @@ pub enum Event {
     PassIntercepted { by: u32 },
     /// A carrier reached its goal and began an offering (the wind-up).
     OfferingStarted { carrier: u32 },
-    /// An offering was rejected — the soul is spat back into open play (no
-    /// cheap put-back; a fresh scramble).
-    OfferingMissed { carrier: u32 },
+    /// An offering resolved with a `chance`% to score. On a miss the soul is
+    /// spat back into open play (no cheap put-back; a fresh scramble).
+    OfferingResolved {
+        carrier: u32,
+        chance: u8,
+        scored: bool,
+    },
     /// A team banked a soul (a successful offering). `score` is the running
     /// tally `[team0, team1]` after this score.
     Scored { team: u8, score: [u32; 2] },

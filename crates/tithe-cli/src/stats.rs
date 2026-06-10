@@ -38,8 +38,12 @@ pub fn run(args: &[String]) {
                     }
                     Event::PassMade { .. } => passes += 1,
                     Event::PassIntercepted { .. } => intercepts += 1,
-                    Event::OfferingStarted { .. } => offers += 1,
-                    Event::OfferingMissed { .. } => offers_missed += 1,
+                    Event::OfferingResolved { scored, .. } => {
+                        offers += 1;
+                        if !scored {
+                            offers_missed += 1;
+                        }
+                    }
                     _ => {}
                 }
             }
