@@ -387,100 +387,139 @@ impl Simulation {
         }
     }
 
-    /// The carrier may pass: launch the soul to the teammate whose value as a
-    /// receiver (goal-closeness × openness, through a clear lane) beats the
-    /// carrier's own value by `pass_value_margin`. This is the drive-and-kick —
-    /// a pressured carrier dishes to an open, better-placed teammate. Resolved
-    /// on the decision clock.
+    /// The carrier weighs carrying vs passing on one shared value field
+    /// (expected value). Carrying = my offering value here, minus a turnover
+    /// cost (how pressured I am × what the opponent gains from this spot). A
+    /// pass = P(complete) × the receiver's value − P(lost) × what the opponent
+    /// gains at the interception point. The best option that beats carrying (by
+    /// a margin) launches the soul; the completion roll decides the outcome at
+    /// release. Better passers complete more, so they pass more.
     fn resolve_pass(&mut self, events: &mut Vec<Event>) {
         let Possession::Held(carrier_id) = self.soul.possession else {
             return;
         };
         let team = self.agents[carrier_id as usize].team;
         let carrier_pos = self.agents[carrier_id as usize].pos;
-        let goal = self.goals[team as usize];
-        let max_dist = self.config.pass_max_dist;
+        let my_goal = self.goals[team as usize];
+        let enemy_goal = self.goals[1 - team as usize];
+        let passing = self.agents[carrier_id as usize].attributes.passing;
+        let aversion = self.config.turnover_aversion;
 
-        let enemies: Vec<Vec2> = self
-            .agents
-            .iter()
-            .filter(|a| a.team != team)
-            .map(|a| a.pos)
-            .collect();
+        let enemies: Vec<Vec2> = self.team_positions(1 - team);
+        let allies: Vec<Vec2> = self.team_positions(team);
 
-        // A receiver must beat the carrier's own value by the margin.
-        let carrier_value = value::value_at(carrier_pos, goal, &enemies, &self.config);
-        let mut best_value = carrier_value + self.config.pass_value_margin;
-        let mut receiver: Option<u32> = None;
+        // Carrying: offering value here minus the cost of being stripped.
+        let carry_value = value::value_at(carrier_pos, my_goal, &enemies, &self.config);
+        let carry_risk = Fx::from_num(1) - value::openness(carrier_pos, &enemies, &self.config);
+        let carry_cost =
+            carry_risk * value::value_at(carrier_pos, enemy_goal, &allies, &self.config) * aversion;
+        let mut best_ev = carry_value - carry_cost + self.config.pass_value_margin;
+
+        let mut chosen: Option<(u32, Fx, Option<u32>)> = None; // receiver, completion, blocker
         for agent in &self.agents {
             if agent.team != team || agent.id == carrier_id || !agent.is_active() {
                 continue;
             }
-            if carrier_pos.distance_to(agent.pos) > max_dist {
+            if carrier_pos.distance_to(agent.pos) > self.config.pass_max_dist {
                 continue;
             }
-            // Don't pass to a covered man — an enemy on the receiver would just
-            // pick it off at the catch.
-            let covered = enemies
-                .iter()
-                .any(|e| e.distance_to(agent.pos) <= self.config.intercept_radius);
-            if covered {
+            let (lane, blocker) = self.pass_lane(carrier_pos, agent.pos, team);
+            // Better passers thread tighter lanes (uniform 0.5 ⇒ lane unchanged).
+            let completion = (lane * (Fx::from_num(1) / Fx::from_num(2) + passing))
+                .clamp(Fx::from_num(0), Fx::from_num(1));
+            if completion < self.config.pass_min_lane {
                 continue;
             }
-            let lane = value::lane_clear(carrier_pos, agent.pos, &enemies, &self.config);
-            if lane < self.config.pass_min_lane {
-                continue; // don't force a pass into a covered lane
-            }
-            let score = value::value_at(agent.pos, goal, &enemies, &self.config) * lane;
-            if score > best_value {
-                best_value = score;
-                receiver = Some(agent.id);
+            let benefit = value::value_at(agent.pos, my_goal, &enemies, &self.config) * completion;
+            let loss_point = blocker.map_or(agent.pos, |b| self.agents[b as usize].pos);
+            let cost = (Fx::from_num(1) - completion)
+                * value::value_at(loss_point, enemy_goal, &allies, &self.config)
+                * aversion;
+            let ev = benefit - cost;
+            if ev > best_ev {
+                best_ev = ev;
+                chosen = Some((agent.id, completion, blocker));
             }
         }
 
-        if let Some(to) = receiver {
-            self.soul.possession = Possession::InFlight { to };
+        if let Some((receiver, completion, blocker)) = chosen {
+            let pct = (completion * Fx::from_num(100)).to_num::<u64>();
+            let completed = self.rng.below(100) < pct;
+            let intercepted = !completed && blocker.is_some();
+            let to = if intercepted {
+                blocker.expect("a failed pass has a blocker")
+            } else {
+                receiver
+            };
+            self.soul.possession = Possession::InFlight { to, intercepted };
             events.push(Event::PassMade {
                 from: carrier_id,
-                to,
+                to: receiver,
+                chance: pct as u8,
             });
         }
     }
 
-    /// Advance a pass in flight. The soul homes onto the receiver; an enemy
-    /// whose body is within `intercept_radius` of the soul's path this tick
-    /// picks it off (a turnover). Otherwise the receiver catches it within
-    /// `pickup_radius`. Interception is positional — no RNG — and consistent
-    /// with the `lane_clear` the carrier already prices into a pass.
-    fn advance_soul_flight(&mut self, events: &mut Vec<Event>) {
-        let Possession::InFlight { to } = self.soul.possession else {
-            return;
-        };
-        let receiver_team = self.agents[to as usize].team;
-        let target = self.agents[to as usize].pos;
-        let from = self.soul.pos;
-        let new_pos = world::step_toward(from, target, self.config.pass_speed);
-        self.soul.pos = new_pos;
-
-        // An enemy on the flight segment steals it (id order breaks ties).
-        let intercept_radius = self.config.intercept_radius;
-        for i in 0..self.agents.len() {
-            if self.agents[i].team == receiver_team || !self.agents[i].is_active() {
+    /// Lane clearance in `[0, 1]` for a pass `from`→`to`, plus the worst lane
+    /// defender (the would-be interceptor). Per-defender block = perp_factor ×
+    /// the defender's Contesting; endpoints excluded (a defender on the passer
+    /// or receiver isn't *in* the lane).
+    fn pass_lane(&self, from: Vec2, to: Vec2, passing_team: u8) -> (Fx, Option<u32>) {
+        let seg = to - from;
+        let len_sq: WideFx = seg.x.wide_mul(seg.x) + seg.y.wide_mul(seg.y);
+        let zero = WideFx::from_num(0);
+        if len_sq <= zero {
+            return (Fx::from_num(1), None);
+        }
+        let radius = self.config.lane_radius;
+        let mut max_block = Fx::from_num(0);
+        let mut blocker = None;
+        for agent in &self.agents {
+            if agent.team == passing_team || !agent.is_active() {
                 continue;
             }
-            if fx::point_to_segment_distance(self.agents[i].pos, from, new_pos) <= intercept_radius
-            {
-                let by = self.agents[i].id;
-                self.soul.possession = Possession::Held(by);
-                self.soul.pos = self.agents[i].pos;
-                events.push(Event::PassIntercepted { by });
-                events.push(Event::PossessionGained { agent: by });
-                return;
+            let off = agent.pos - from;
+            let dot: WideFx = off.x.wide_mul(seg.x) + off.y.wide_mul(seg.y);
+            if dot <= zero || dot >= len_sq {
+                continue; // not strictly between the endpoints
+            }
+            let t = Fx::saturating_from_num(dot / len_sq);
+            let perp = agent.pos.distance_to(from + seg.scale(t));
+            if perp >= radius {
+                continue;
+            }
+            let block = (Fx::from_num(1) - perp / radius) * agent.attributes.contesting;
+            if block > max_block {
+                max_block = block;
+                blocker = Some(agent.id);
             }
         }
+        (Fx::from_num(1) - max_block, blocker)
+    }
 
-        if new_pos.distance_to(target) <= self.config.pickup_radius {
+    /// The positions of every active agent on `team`.
+    fn team_positions(&self, team: u8) -> Vec<Vec2> {
+        self.agents
+            .iter()
+            .filter(|a| a.team == team)
+            .map(|a| a.pos)
+            .collect()
+    }
+
+    /// Advance a pass in flight to its predetermined catcher (receiver on a
+    /// completion, interceptor on a pick — decided at release). The soul homes
+    /// and is caught within `pickup_radius`; no mid-flight convergence.
+    fn advance_soul_flight(&mut self, events: &mut Vec<Event>) {
+        let Possession::InFlight { to, intercepted } = self.soul.possession else {
+            return;
+        };
+        let target = self.agents[to as usize].pos;
+        self.soul.pos = world::step_toward(self.soul.pos, target, self.config.pass_speed);
+        if self.soul.pos.distance_to(target) <= self.config.pickup_radius {
             self.soul.possession = Possession::Held(to);
+            if intercepted {
+                events.push(Event::PassIntercepted { by: to });
+            }
             events.push(Event::PossessionGained { agent: to });
         }
     }
@@ -588,7 +627,7 @@ impl Simulation {
     /// the catch and defenders converge to contest it.
     fn carrier_info(&self) -> Option<decide::CarrierInfo> {
         let id = match self.soul.possession {
-            Possession::Held(id) | Possession::InFlight { to: id } => id,
+            Possession::Held(id) | Possession::InFlight { to: id, .. } => id,
             Possession::Loose => return None,
         };
         let carrier = &self.agents[id as usize];

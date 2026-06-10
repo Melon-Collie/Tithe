@@ -33,8 +33,8 @@ pub enum Event {
         chance: u8,
         success: bool,
     },
-    /// A carrier launched a pass (flame arc) toward a teammate.
-    PassMade { from: u32, to: u32 },
+    /// A carrier launched a pass toward `to` with a `chance`% to complete.
+    PassMade { from: u32, to: u32, chance: u8 },
     /// An enemy picked off a pass in flight (a turnover).
     PassIntercepted { by: u32 },
     /// A carrier reached its goal and began an offering (the wind-up).

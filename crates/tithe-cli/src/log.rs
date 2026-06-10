@@ -29,7 +29,7 @@ pub fn run(args: &[String]) {
 /// A play-by-play line for a notable event, or `None` to filter it out.
 fn describe(event: &Event) -> Option<String> {
     match event {
-        Event::PassMade { from, to } => Some(format!("P{from} → P{to} (pass)")),
+        Event::PassMade { from, to, chance } => Some(format!("P{from} → P{to} ({chance}%)")),
         Event::PassIntercepted { by } => Some(format!("    ...intercepted by P{by}!")),
         Event::StripAttempt {
             defender,
