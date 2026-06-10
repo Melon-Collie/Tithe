@@ -66,7 +66,8 @@
       drawArena();
       for (let i = 0; i < f.agents.length; i++) {
         const a = f.agents[i], m = meta[i];
-        ctx.globalAlpha = a.stagger ? 0.3 : 1;
+        // Tired agents fade (stamina visible in the body); staggered = dimmest.
+        ctx.globalAlpha = a.stagger ? 0.25 : 0.45 + 0.55 * (a.stamina ?? 1);
         ctx.fillStyle = teamColor(m.team);
         ctx.beginPath(); ctx.arc(sx(a.x), sy(a.y), 6, 0, Math.PI * 2); ctx.fill();
         if (f.carrier === m.id) {

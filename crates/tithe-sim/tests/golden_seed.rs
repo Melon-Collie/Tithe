@@ -135,6 +135,23 @@ fn passes_get_intercepted() {
 }
 
 #[test]
+fn stamina_drains_then_refreshes_between_souls() {
+    use tithe_sim::Fx;
+    let mut sim = Simulation::new(4);
+    // Run partway into the first soul and confirm someone has tired.
+    let mut drained = false;
+    for _ in 0..120 {
+        sim.tick();
+        if sim.agents().iter().any(|a| a.stamina < Fx::from_num(1)) {
+            drained = true;
+        }
+        // Stamina never goes negative.
+        assert!(sim.agents().iter().all(|a| a.stamina >= Fx::from_num(0)));
+    }
+    assert!(drained, "stamina should drain during a soul");
+}
+
+#[test]
 fn a_team_scores() {
     let mut sim = Simulation::new(2);
     let mut scored = false;

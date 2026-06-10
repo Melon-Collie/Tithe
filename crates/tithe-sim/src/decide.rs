@@ -109,6 +109,7 @@ mod tests {
             target: Vec2::default(),
             anchor: Vec2::new(Fx::from_num(99), Fx::from_num(0)),
             stagger: 0,
+            stamina: Fx::from_num(1),
         }
     }
 

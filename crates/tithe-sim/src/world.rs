@@ -61,6 +61,12 @@ pub struct SimConfig {
     pub lane_radius: Fx,
     /// Distance from the in-flight soul's path within which an enemy picks it off.
     pub intercept_radius: Fx,
+    /// Stamina lost per tick just by being on the field (active).
+    pub stamina_drain_base: Fx,
+    /// Extra stamina lost per unit of distance moved (effort — pressers tire fastest).
+    pub stamina_drain_per_unit: Fx,
+    /// Speed multiplier at empty stamina (full stamina = 1.0). Gassed = slower.
+    pub stamina_speed_floor: Fx,
 }
 
 impl Default for SimConfig {
@@ -88,6 +94,9 @@ impl Default for SimConfig {
             pressure_max: Fx::from_num(2),
             lane_radius: Fx::from_num(4),
             intercept_radius: Fx::from_num(3),
+            stamina_drain_base: Fx::from_num(5) / Fx::from_num(10000), // 0.0005
+            stamina_drain_per_unit: Fx::from_num(25) / Fx::from_num(10000), // 0.0025
+            stamina_speed_floor: Fx::from_num(55) / Fx::from_num(100), // 0.55
         }
     }
 }
@@ -131,7 +140,8 @@ impl Formation {
 }
 
 /// A single agent: identity, team, where it is, where it's headed, its home
-/// anchor, and how many ticks it remains staggered (0 = active).
+/// anchor, how many ticks it remains staggered (0 = active), and its stamina
+/// (1 = fresh, draining over a soul).
 #[derive(Debug, Clone)]
 pub struct Agent {
     pub id: u32,
@@ -140,6 +150,7 @@ pub struct Agent {
     pub target: Vec2,
     pub anchor: Vec2,
     pub stagger: u32,
+    pub stamina: Fx,
 }
 
 impl Agent {
@@ -220,5 +231,6 @@ fn push_agent(agents: &mut Vec<Agent>, team: u8, anchor: Vec2) {
         target: anchor,
         anchor,
         stagger: 0,
+        stamina: Fx::from_num(1),
     });
 }

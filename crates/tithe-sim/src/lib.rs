@@ -217,16 +217,27 @@ impl Simulation {
         }
     }
 
-    /// Move every active agent toward its target; staggered agents recover a
-    /// tick instead. Either way, emit the agent's position.
+    /// Move every active agent toward its target at a stamina-scaled speed, and
+    /// drain stamina (more from effort, so the hardest workers tire first).
+    /// Staggered agents recover a tick instead. Either way, emit the position.
     fn advance_motion(&mut self, events: &mut Vec<Event>) {
         let max_speed = self.config.max_speed;
+        let floor = self.config.stamina_speed_floor;
+        let drain_base = self.config.stamina_drain_base;
+        let drain_per_unit = self.config.stamina_drain_per_unit;
+        let one = Fx::from_num(1);
+        let zero = Fx::from_num(0);
+
         for i in 0..self.agents.len() {
             if self.agents[i].stagger > 0 {
                 self.agents[i].stagger -= 1;
             } else {
-                self.agents[i].pos =
-                    world::step_toward(self.agents[i].pos, self.agents[i].target, max_speed);
+                let speed = max_speed * (floor + (one - floor) * self.agents[i].stamina);
+                let from = self.agents[i].pos;
+                let to = world::step_toward(from, self.agents[i].target, speed);
+                self.agents[i].pos = to;
+                let drain = drain_base + drain_per_unit * from.distance_to(to);
+                self.agents[i].stamina = (self.agents[i].stamina - drain).max(zero);
             }
             events.push(Event::AgentMoved {
                 agent: self.agents[i].id,
@@ -389,6 +400,7 @@ impl Simulation {
             agent.pos = agent.anchor;
             agent.target = agent.anchor;
             agent.stagger = 0;
+            agent.stamina = Fx::from_num(1); // fresh unit each soul (subs between souls)
         }
     }
 

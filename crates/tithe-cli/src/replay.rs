@@ -47,6 +47,7 @@ struct AgentFrame {
     x: f32,
     y: f32,
     stagger: bool,
+    stamina: f32,
 }
 
 fn xy(p: Vec2) -> [f32; 2] {
@@ -98,6 +99,7 @@ fn build_export(seed: u64, max_ticks: u64) -> MatchExport {
                     x: a.pos.x.to_num(),
                     y: a.pos.y.to_num(),
                     stagger: a.stagger > 0,
+                    stamina: a.stamina.to_num(),
                 })
                 .collect(),
             scored,
