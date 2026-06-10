@@ -55,6 +55,16 @@ impl Vec2 {
     pub fn distance_to(self, other: Vec2) -> Fx {
         (self - other).length()
     }
+
+    /// This vector shortened to at most `max` length (direction preserved).
+    pub fn clamp_len(self, max: Fx) -> Vec2 {
+        let len = self.length();
+        if len <= max {
+            self
+        } else {
+            self.scale(max / len)
+        }
+    }
 }
 
 /// Shortest distance from point `p` to the segment `a`–`b` (endpoints clamped).
@@ -130,6 +140,17 @@ mod tests {
         // 200² = 40000 overflows Q16.16 (±32768); wide_mul keeps it exact.
         let v = Vec2::new(Fx::from_num(200), Fx::from_num(0));
         assert!(close(v.length(), Fx::from_num(200)));
+    }
+
+    #[test]
+    fn clamp_len_shortens_long_vectors_only() {
+        let v = Vec2::new(Fx::from_num(30), Fx::from_num(40)); // length 50
+        assert!(close(
+            v.clamp_len(Fx::from_num(10)).length(),
+            Fx::from_num(10)
+        ));
+        // Already shorter than max: unchanged.
+        assert_eq!(v.clamp_len(Fx::from_num(100)), v);
     }
 
     #[test]

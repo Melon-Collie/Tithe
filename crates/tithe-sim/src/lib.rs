@@ -163,11 +163,32 @@ impl Simulation {
     }
 
     /// Each agent scores the situation and commits to a target for the window.
+    /// Off-ball agents shade by the value field (see `decide::off_ball_target`);
+    /// active-pursuit intents map straight to their target.
     fn run_decisions(&mut self) {
         let carrier = self.carrier_info();
-        for agent in self.agents.iter_mut() {
-            let intent = decide::choose_intent(agent, &self.soul, carrier, &self.config);
-            agent.target = decide::target_for(intent, agent, &self.soul, carrier, self.goals);
+        let mut team_pos: [Vec<Vec2>; 2] = [Vec::new(), Vec::new()];
+        for agent in &self.agents {
+            team_pos[agent.team as usize].push(agent.pos);
+        }
+
+        for i in 0..self.agents.len() {
+            let intent = decide::choose_intent(&self.agents[i], &self.soul, carrier, &self.config);
+            let agent = &self.agents[i];
+            let target = if intent == decide::Intent::HoldAnchor {
+                let t = agent.team as usize;
+                decide::off_ball_target(
+                    agent,
+                    carrier,
+                    self.goals,
+                    &team_pos[t],
+                    &team_pos[1 - t],
+                    &self.config,
+                )
+            } else {
+                decide::target_for(intent, agent, &self.soul, carrier, self.goals)
+            };
+            self.agents[i].target = target;
         }
     }
 

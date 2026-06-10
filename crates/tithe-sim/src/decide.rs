@@ -15,6 +15,7 @@
 //! choice is reproducible.
 
 use crate::fx::{Fx, Vec2};
+use crate::value;
 use crate::world::{Agent, SimConfig, Soul};
 
 /// A snapshot of whoever currently carries the soul — passed to the scorer so
@@ -70,7 +71,8 @@ pub fn choose_intent(
     }
 }
 
-/// Map a chosen intent to the point the agent should move toward.
+/// Map an *active-pursuit* intent to the point the agent should move toward.
+/// Off-ball positioning (`HoldAnchor`) is value-driven — see [`off_ball_target`].
 pub fn target_for(
     intent: Intent,
     agent: &Agent,
@@ -80,10 +82,72 @@ pub fn target_for(
 ) -> Vec2 {
     match intent {
         Intent::ChaseSoul => soul.pos,
-        Intent::HoldAnchor => agent.anchor,
+        Intent::HoldAnchor => agent.anchor, // static fallback; the sim uses off_ball_target
         Intent::CarryToGoal => goals[agent.team as usize],
         Intent::ContestCarrier => carrier.map_or(agent.anchor, |c| c.pos),
     }
+}
+
+/// Where an off-ball agent should shade, chosen by the value field within a
+/// bounded drift of its anchor (the shape breathes, never dissolves):
+///
+/// - **Attacking** (my team has the soul): be a great pass target — maximize
+///   `value_at × lane_clear(from the carrier)`. Open, advanced, and reachable.
+/// - **Defending / loose:** cover the threat — go to the spot of highest
+///   *enemy* value (close to their goal, currently uncovered by us). Getting
+///   into lanes and challenging falls out of denying that value.
+///
+/// We read the value field at a few stand-positions and pick the best — a
+/// pointwise *perception* of where to be, not lookahead or search (§2).
+pub fn off_ball_target(
+    agent: &Agent,
+    carrier: Option<CarrierInfo>,
+    goals: [Vec2; 2],
+    allies: &[Vec2],
+    enemies: &[Vec2],
+    config: &SimConfig,
+) -> Vec2 {
+    let team_has_soul = carrier.is_some_and(|c| c.team == agent.team);
+    let my_goal = goals[agent.team as usize];
+    let enemy_goal = goals[1 - agent.team as usize];
+    let mut best = agent.anchor;
+    let mut best_score = Fx::from_num(-1);
+    for offset in candidate_offsets(config.drift_radius) {
+        let candidate = agent.anchor + offset;
+        let score = if team_has_soul {
+            let reachable = match carrier {
+                Some(c) => value::lane_clear(c.pos, candidate, enemies, config),
+                None => Fx::from_num(1),
+            };
+            value::value_at(candidate, my_goal, enemies, config) * reachable
+        } else {
+            // Highest enemy value = where they most want the soul and we aren't.
+            value::value_at(candidate, enemy_goal, allies, config)
+        };
+        if score > best_score {
+            best_score = score;
+            best = candidate;
+        }
+    }
+    best
+}
+
+/// The bounded set of stand-positions an off-ball agent considers: its anchor
+/// plus eight compass offsets at the drift radius.
+fn candidate_offsets(drift: Fx) -> [Vec2; 9] {
+    let zero = Fx::from_num(0);
+    let diag = drift * Fx::from_num(7) / Fx::from_num(10); // ~0.7·drift, so the diagonal ≈ drift
+    [
+        Vec2::new(zero, zero),
+        Vec2::new(drift, zero),
+        Vec2::new(-drift, zero),
+        Vec2::new(zero, drift),
+        Vec2::new(zero, -drift),
+        Vec2::new(diag, diag),
+        Vec2::new(diag, -diag),
+        Vec2::new(-diag, diag),
+        Vec2::new(-diag, -diag),
+    ]
 }
 
 /// Proximity consideration: 1 on the point, falling linearly to 0 at `max_dist`.
@@ -146,6 +210,28 @@ mod tests {
         assert_eq!(
             target_for(Intent::CarryToGoal, &me, &soul, carrier, goals),
             goals[0]
+        );
+    }
+
+    #[test]
+    fn off_ball_attacker_shades_toward_a_better_pass_target() {
+        let cfg = SimConfig::default();
+        let goals = cfg.goals(); // team 0 goal at (-45, 0)
+        let mut me = agent(1, 0, 0, 0);
+        me.anchor = Vec2::new(Fx::from_num(0), Fx::from_num(0)); // within the value span
+                                                                 // My team has the soul; an enemy sits right on my anchor crowding it.
+        let enemies = [me.anchor];
+        let carrier = Some(CarrierInfo {
+            id: 2,
+            team: 0,
+            pos: Vec2::new(Fx::from_num(80), Fx::from_num(0)),
+        });
+        let target = off_ball_target(&me, carrier, goals, &[], &enemies, &cfg);
+        // I should not stay on the crowded anchor...
+        assert_ne!(target, me.anchor);
+        // ...and the shade stays within the drift budget.
+        assert!(
+            (target - me.anchor).length() <= cfg.drift_radius + Fx::from_num(1) / Fx::from_num(100)
         );
     }
 

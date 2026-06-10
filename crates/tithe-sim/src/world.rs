@@ -67,6 +67,9 @@ pub struct SimConfig {
     pub stamina_drain_per_unit: Fx,
     /// Speed multiplier at empty stamina (full stamina = 1.0). Gassed = slower.
     pub stamina_speed_floor: Fx,
+    /// How far an off-ball agent may shade off its anchor toward the play
+    /// (bounded drift / elasticity — the shape breathes but never dissolves).
+    pub drift_radius: Fx,
 }
 
 impl Default for SimConfig {
@@ -97,6 +100,7 @@ impl Default for SimConfig {
             stamina_drain_base: Fx::from_num(5) / Fx::from_num(10000), // 0.0005
             stamina_drain_per_unit: Fx::from_num(25) / Fx::from_num(10000), // 0.0025
             stamina_speed_floor: Fx::from_num(55) / Fx::from_num(100), // 0.55
+            drift_radius: Fx::from_num(10),
         }
     }
 }
