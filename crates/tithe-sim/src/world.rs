@@ -24,11 +24,9 @@ pub struct SimConfig {
     pub arena_half_y: Fx,
     /// How close an agent must get to a loose soul to claim it.
     pub pickup_radius: Fx,
-    /// Distance at which the "chase the soul" urge fades to zero.
+    /// Farthest a player will chase a loose soul (even its team's nearest holds
+    /// shape beyond this, rather than abandoning the formation).
     pub chase_max_dist: Fx,
-    /// Baseline pull of holding the anchor while the soul is loose — agents
-    /// whose chase urge beats this collapse on the ball; the rest hold shape.
-    pub hold_base: Fx,
     /// X-coordinate of a home goal (team 0 attacks -goal_x, team 1 +goal_x).
     pub goal_x: Fx,
     /// How close a defender must be to an enemy carrier to lunge for a strip.
@@ -70,6 +68,11 @@ pub struct SimConfig {
     /// How far an off-ball agent may shade off its anchor toward the play
     /// (bounded drift / elasticity — the shape breathes but never dissolves).
     pub drift_radius: Fx,
+    /// Agents closer than this push apart (kept below strip_radius so it never
+    /// blocks a legitimate contest).
+    pub separation_radius: Fx,
+    /// Maximum separation push applied per tick.
+    pub separation_step: Fx,
 }
 
 impl Default for SimConfig {
@@ -81,7 +84,6 @@ impl Default for SimConfig {
             arena_half_y: Fx::from_num(30),
             pickup_radius: Fx::from_num(2),
             chase_max_dist: Fx::from_num(120),
-            hold_base: Fx::from_num(15) / Fx::from_num(100), // 0.15
             goal_x: Fx::from_num(45),
             strip_radius: Fx::from_num(3),
             contest_range: Fx::from_num(25),
@@ -101,6 +103,8 @@ impl Default for SimConfig {
             stamina_drain_per_unit: Fx::from_num(25) / Fx::from_num(10000), // 0.0025
             stamina_speed_floor: Fx::from_num(55) / Fx::from_num(100), // 0.55
             drift_radius: Fx::from_num(10),
+            separation_radius: Fx::from_num(5) / Fx::from_num(2), // 2.5 (< strip_radius 3)
+            separation_step: Fx::from_num(1),
         }
     }
 }

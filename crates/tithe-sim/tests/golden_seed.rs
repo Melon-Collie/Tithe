@@ -64,6 +64,33 @@ fn two_teams_of_seven() {
 }
 
 #[test]
+fn faceoff_only_nearest_contest() {
+    let mut sim = Simulation::new(1);
+    sim.tick(); // first decision = the faceoff draw
+    let center = tithe_sim::Vec2::default(); // the loose soul starts at center
+    let contestants = sim.agents().iter().filter(|a| a.target == center).count();
+    assert!(
+        contestants <= 2,
+        "only each team's nearest should contest the draw, got {contestants}"
+    );
+}
+
+#[test]
+fn agents_do_not_stack() {
+    use tithe_sim::Fx;
+    let mut sim = Simulation::new(1);
+    for _ in 0..400 {
+        sim.tick();
+    }
+    let a = sim.agents();
+    let min_dist = (0..a.len())
+        .flat_map(|i| ((i + 1)..a.len()).map(move |j| a[i].pos.distance_to(a[j].pos)))
+        .min()
+        .unwrap();
+    assert!(min_dist > Fx::from_num(1), "separation should keep agents apart");
+}
+
+#[test]
 fn loose_soul_gets_claimed() {
     let mut sim = Simulation::new(7);
     let mut claimed = false;

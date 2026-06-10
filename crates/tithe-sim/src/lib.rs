@@ -23,15 +23,15 @@
 //!   (`Vec`/`BTreeMap`) or sort-before-iterate; never let `HashMap` iteration
 //!   order leak into the event stream.
 //!
-//! ## Status (Slice 4 — a complete match)
+//! ## Status (Phase A complete — a playable sport)
 //!
-//! What exists: fixed-point math, the two-clock tick loop, the utility-scored
-//! decision model, two teams contesting one soul, the strip verb (win = clean
-//! possession, whiff = stagger), turnovers, carriers advancing toward their
-//! home goals, the touch-in offering, between-souls reset, and a first-to-X
-//! winner. What's still open: cast-from-range offerings (needs the Finishing
-//! attribute), passing, the anti-loiter aura, stamina, and player attributes
-//! (design doc §1, §4, §13).
+//! What exists: fixed-point math, the two-clock tick loop, the utility decision
+//! model with a shared value field and value-driven off-ball positioning, two
+//! teams, a faceoff draw (nearest contests), the strip verb (win/whiff/stagger),
+//! turnovers, passing with in-flight interception, stamina, agent separation,
+//! the touch-in offering, between-souls reset, and a first-to-X winner. What's
+//! still open: cast-from-range offerings (needs the Finishing attribute), the
+//! anti-loiter aura, and player attributes (design doc §1, §4, §13).
 
 // Determinism guards specific to the sim core (front-end Rust crates, if any,
 // would legitimately use floats, so these are not workspace-wide).
@@ -149,7 +149,14 @@ impl Simulation {
             self.resolve_pass(&mut events);
         }
 
-        self.advance_motion(&mut events);
+        self.advance_motion();
+        self.apply_separation();
+        for agent in &self.agents {
+            events.push(Event::AgentMoved {
+                agent: agent.id,
+                pos: agent.pos,
+            });
+        }
         self.advance_soul_flight(&mut events);
         self.claim_loose_soul(&mut events);
         self.carry_soul();
@@ -171,9 +178,17 @@ impl Simulation {
         for agent in &self.agents {
             team_pos[agent.team as usize].push(agent.pos);
         }
+        let nearest = self.nearest_to_loose_soul();
 
         for i in 0..self.agents.len() {
-            let intent = decide::choose_intent(&self.agents[i], &self.soul, carrier, &self.config);
+            let is_nearest = nearest[self.agents[i].team as usize] == Some(self.agents[i].id);
+            let intent = decide::choose_intent(
+                &self.agents[i],
+                &self.soul,
+                carrier,
+                is_nearest,
+                &self.config,
+            );
             let agent = &self.agents[i];
             let target = if intent == decide::Intent::HoldAnchor {
                 let t = agent.team as usize;
@@ -238,10 +253,31 @@ impl Simulation {
         }
     }
 
+    /// The id of the agent nearest a loose soul on each team (`None` per team if
+    /// the soul isn't loose). Only that agent contests the draw.
+    fn nearest_to_loose_soul(&self) -> [Option<u32>; 2] {
+        if !self.soul.is_loose() {
+            return [None, None];
+        }
+        let mut best: [Option<(Fx, u32)>; 2] = [None, None];
+        for agent in &self.agents {
+            if !agent.is_active() {
+                continue;
+            }
+            let dist = agent.pos.distance_to(self.soul.pos);
+            let slot = &mut best[agent.team as usize];
+            if slot.is_none_or(|(d, _)| dist < d) {
+                *slot = Some((dist, agent.id));
+            }
+        }
+        [best[0].map(|(_, id)| id), best[1].map(|(_, id)| id)]
+    }
+
     /// Move every active agent toward its target at a stamina-scaled speed, and
     /// drain stamina (more from effort, so the hardest workers tire first).
-    /// Staggered agents recover a tick instead. Either way, emit the position.
-    fn advance_motion(&mut self, events: &mut Vec<Event>) {
+    /// Staggered agents recover a tick instead. No events — positions are
+    /// emitted after separation resolves.
+    fn advance_motion(&mut self) {
         let max_speed = self.config.max_speed;
         let floor = self.config.stamina_speed_floor;
         let drain_base = self.config.stamina_drain_base;
@@ -260,10 +296,46 @@ impl Simulation {
                 let drain = drain_base + drain_per_unit * from.distance_to(to);
                 self.agents[i].stamina = (self.agents[i].stamina - drain).max(zero);
             }
-            events.push(Event::AgentMoved {
-                agent: self.agents[i].id,
-                pos: self.agents[i].pos,
-            });
+        }
+    }
+
+    /// Push apart any agents closer than `separation_radius` (bounded per tick),
+    /// so they don't stack. Pure positional steering — reads all positions, then
+    /// applies displacements, so it's order-independent and deterministic. Kept
+    /// below `strip_radius`, so it never blocks a legitimate contest.
+    fn apply_separation(&mut self) {
+        let radius = self.config.separation_radius;
+        let max_step = self.config.separation_step;
+        let touching = Fx::from_num(1) / Fx::from_num(100);
+        let n = self.agents.len();
+
+        let pushes: Vec<Vec2> = (0..n)
+            .map(|i| {
+                let me = &self.agents[i];
+                let mut push = Vec2::default();
+                for (j, other) in self.agents.iter().enumerate() {
+                    if i == j {
+                        continue;
+                    }
+                    let delta = me.pos - other.pos;
+                    let dist = delta.length();
+                    if dist >= radius {
+                        continue;
+                    }
+                    if dist > touching {
+                        // Away from `other`, stronger the deeper the overlap.
+                        push = push + delta.scale((radius - dist) / dist);
+                    } else {
+                        // Exactly coincident: nudge deterministically by id order.
+                        let nudge = if me.id < other.id { radius } else { -radius };
+                        push = push + Vec2::new(nudge, Fx::from_num(0));
+                    }
+                }
+                push.clamp_len(max_step)
+            })
+            .collect();
+        for (agent, push) in self.agents.iter_mut().zip(pushes) {
+            agent.pos = agent.pos + push;
         }
     }
 

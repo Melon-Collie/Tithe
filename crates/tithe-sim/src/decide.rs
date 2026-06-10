@@ -40,17 +40,21 @@ pub enum Intent {
     ContestCarrier,
 }
 
-/// Score the situation and return the chosen intent.
+/// Score the situation and return the chosen intent. `is_team_nearest` is true
+/// when this agent is the closest on its team to a loose soul — only that agent
+/// contests the draw; the rest hold shape.
 pub fn choose_intent(
     agent: &Agent,
     soul: &Soul,
     carrier: Option<CarrierInfo>,
+    is_team_nearest: bool,
     config: &SimConfig,
 ) -> Intent {
     match carrier {
-        // Loose soul: collapse on it if the proximity urge beats holding shape.
+        // Loose soul: only the nearest teammate (and only if it's worth leaving
+        // the shape for) goes; everyone else holds.
         None => {
-            if proximity(agent.pos, soul.pos, config.chase_max_dist) > config.hold_base {
+            if is_team_nearest && agent.pos.distance_to(soul.pos) <= config.chase_max_dist {
                 Intent::ChaseSoul
             } else {
                 Intent::HoldAnchor
@@ -150,16 +154,6 @@ fn candidate_offsets(drift: Fx) -> [Vec2; 9] {
     ]
 }
 
-/// Proximity consideration: 1 on the point, falling linearly to 0 at `max_dist`.
-fn proximity(from: Vec2, to: Vec2, max_dist: Fx) -> Fx {
-    let dist = from.distance_to(to);
-    if dist >= max_dist {
-        Fx::from_num(0)
-    } else {
-        Fx::from_num(1) - dist / max_dist
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,7 +186,7 @@ mod tests {
         let cfg = SimConfig::default();
         let soul = Soul::loose_at(Vec2::default());
         assert_eq!(
-            choose_intent(&agent(0, 0, 3, 0), &soul, None, &cfg),
+            choose_intent(&agent(0, 0, 3, 0), &soul, None, true, &cfg),
             Intent::ChaseSoul
         );
     }
@@ -203,7 +197,7 @@ mod tests {
         let me = agent(2, 0, 5, 5);
         let (soul, carrier) = held_by(2, 0, me.pos);
         assert_eq!(
-            choose_intent(&me, &soul, carrier, &cfg),
+            choose_intent(&me, &soul, carrier, false, &cfg),
             Intent::CarryToGoal
         );
         let goals = cfg.goals();
@@ -241,7 +235,7 @@ mod tests {
         let me = agent(7, 1, 5, 0);
         let (soul, carrier) = held_by(2, 0, Vec2::new(Fx::from_num(8), Fx::from_num(0)));
         assert_eq!(
-            choose_intent(&me, &soul, carrier, &cfg),
+            choose_intent(&me, &soul, carrier, false, &cfg),
             Intent::ContestCarrier
         );
     }
@@ -252,7 +246,10 @@ mod tests {
         let me = agent(7, 1, 0, 0);
         // 40 units away, beyond contest_range (25).
         let (soul, carrier) = held_by(2, 0, Vec2::new(Fx::from_num(40), Fx::from_num(0)));
-        assert_eq!(choose_intent(&me, &soul, carrier, &cfg), Intent::HoldAnchor);
+        assert_eq!(
+            choose_intent(&me, &soul, carrier, false, &cfg),
+            Intent::HoldAnchor
+        );
     }
 
     #[test]
@@ -260,6 +257,9 @@ mod tests {
         let cfg = SimConfig::default();
         let me = agent(1, 0, 5, 0);
         let (soul, carrier) = held_by(2, 0, Vec2::new(Fx::from_num(6), Fx::from_num(0)));
-        assert_eq!(choose_intent(&me, &soul, carrier, &cfg), Intent::HoldAnchor);
+        assert_eq!(
+            choose_intent(&me, &soul, carrier, false, &cfg),
+            Intent::HoldAnchor
+        );
     }
 }
