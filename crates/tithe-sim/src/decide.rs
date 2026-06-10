@@ -41,8 +41,9 @@ pub enum Intent {
 }
 
 /// Score the situation and return the chosen intent. `is_team_nearest` is true
-/// when this agent is the closest on its team to a loose soul — only that agent
-/// contests the draw; the rest hold shape.
+/// when this agent is the closest on its team to the soul (loose or carried) —
+/// only that agent leaves the shape to engage; everyone else holds. This is what
+/// keeps the formation intact instead of the whole team chasing the ball.
 pub fn choose_intent(
     agent: &Agent,
     soul: &Soul,
@@ -51,8 +52,8 @@ pub fn choose_intent(
     config: &SimConfig,
 ) -> Intent {
     match carrier {
-        // Loose soul: only the nearest teammate (and only if it's worth leaving
-        // the shape for) goes; everyone else holds.
+        // Loose soul: only the nearest teammate (if it's worth leaving the shape
+        // for) contests the draw; everyone else holds.
         None => {
             if is_team_nearest && agent.pos.distance_to(soul.pos) <= config.chase_max_dist {
                 Intent::ChaseSoul
@@ -62,9 +63,10 @@ pub fn choose_intent(
         }
         // I'm the carrier.
         Some(c) if c.id == agent.id => Intent::CarryToGoal,
-        // An enemy carries it: close down if near enough, else hold shape.
+        // An enemy carries it: only our nearest defender closes down; the rest
+        // hold their defensive shape rather than swarming the ball.
         Some(c) if c.team != agent.team => {
-            if agent.pos.distance_to(c.pos) <= config.contest_range {
+            if is_team_nearest && agent.pos.distance_to(c.pos) <= config.contest_range {
                 Intent::ContestCarrier
             } else {
                 Intent::HoldAnchor
@@ -234,8 +236,9 @@ mod tests {
         let cfg = SimConfig::default();
         let me = agent(7, 1, 5, 0);
         let (soul, carrier) = held_by(2, 0, Vec2::new(Fx::from_num(8), Fx::from_num(0)));
+        // I'm my team's nearest to the carrier, so I close down.
         assert_eq!(
-            choose_intent(&me, &soul, carrier, false, &cfg),
+            choose_intent(&me, &soul, carrier, true, &cfg),
             Intent::ContestCarrier
         );
     }
@@ -244,10 +247,10 @@ mod tests {
     fn defender_holds_shape_when_enemy_carrier_is_far() {
         let cfg = SimConfig::default();
         let me = agent(7, 1, 0, 0);
-        // 40 units away, beyond contest_range (25).
+        // Nearest, but 40 units away — beyond contest_range (25), so hold.
         let (soul, carrier) = held_by(2, 0, Vec2::new(Fx::from_num(40), Fx::from_num(0)));
         assert_eq!(
-            choose_intent(&me, &soul, carrier, false, &cfg),
+            choose_intent(&me, &soul, carrier, true, &cfg),
             Intent::HoldAnchor
         );
     }

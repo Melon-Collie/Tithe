@@ -49,6 +49,9 @@ pub struct SimConfig {
     pub pass_max_dist: Fx,
     /// How much a receiver's value must beat the carrier's for a pass to fire.
     pub pass_value_margin: Fx,
+    /// Minimum lane clearance (0..1) for a pass to be attempted at all — don't
+    /// force it into traffic.
+    pub pass_min_lane: Fx,
     /// Distance at which goal-closeness value reaches zero (the value field's span).
     pub value_span: Fx,
     /// Radius within which an enemy contributes to a spot's pressure.
@@ -94,6 +97,7 @@ impl Default for SimConfig {
             pass_speed: Fx::from_num(8),
             pass_max_dist: Fx::from_num(40),
             pass_value_margin: Fx::from_num(5) / Fx::from_num(100), // 0.05
+            pass_min_lane: Fx::from_num(7) / Fx::from_num(10),      // 0.7
             value_span: Fx::from_num(90),
             pressure_radius: Fx::from_num(12),
             pressure_max: Fx::from_num(2),

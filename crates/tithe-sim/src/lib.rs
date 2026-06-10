@@ -178,7 +178,7 @@ impl Simulation {
         for agent in &self.agents {
             team_pos[agent.team as usize].push(agent.pos);
         }
-        let nearest = self.nearest_to_loose_soul();
+        let nearest = self.nearest_to_soul();
 
         for i in 0..self.agents.len() {
             let is_nearest = nearest[self.agents[i].team as usize] == Some(self.agents[i].id);
@@ -253,12 +253,10 @@ impl Simulation {
         }
     }
 
-    /// The id of the agent nearest a loose soul on each team (`None` per team if
-    /// the soul isn't loose). Only that agent contests the draw.
-    fn nearest_to_loose_soul(&self) -> [Option<u32>; 2] {
-        if !self.soul.is_loose() {
-            return [None, None];
-        }
+    /// The id of the agent nearest the soul (loose or carried) on each team.
+    /// Only that agent leaves the shape to engage — it contests a loose draw,
+    /// or (on the defending team) challenges the carrier.
+    fn nearest_to_soul(&self) -> [Option<u32>; 2] {
         let mut best: [Option<(Fx, u32)>; 2] = [None, None];
         for agent in &self.agents {
             if !agent.is_active() {
@@ -400,7 +398,18 @@ impl Simulation {
             if carrier_pos.distance_to(agent.pos) > max_dist {
                 continue;
             }
+            // Don't pass to a covered man — an enemy on the receiver would just
+            // pick it off at the catch.
+            let covered = enemies
+                .iter()
+                .any(|e| e.distance_to(agent.pos) <= self.config.intercept_radius);
+            if covered {
+                continue;
+            }
             let lane = value::lane_clear(carrier_pos, agent.pos, &enemies, &self.config);
+            if lane < self.config.pass_min_lane {
+                continue; // don't force a pass into a covered lane
+            }
             let score = value::value_at(agent.pos, goal, &enemies, &self.config) * lane;
             if score > best_value {
                 best_value = score;

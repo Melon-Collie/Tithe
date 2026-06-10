@@ -87,7 +87,10 @@ fn agents_do_not_stack() {
         .flat_map(|i| ((i + 1)..a.len()).map(move |j| a[i].pos.distance_to(a[j].pos)))
         .min()
         .unwrap();
-    assert!(min_dist > Fx::from_num(1), "separation should keep agents apart");
+    assert!(
+        min_dist > Fx::from_num(1),
+        "separation should keep agents apart"
+    );
 }
 
 #[test]
