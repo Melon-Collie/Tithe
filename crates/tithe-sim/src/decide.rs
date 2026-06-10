@@ -85,12 +85,23 @@ pub fn target_for(
     soul: &Soul,
     carrier: Option<CarrierInfo>,
     goals: [Vec2; 2],
+    config: &SimConfig,
 ) -> Vec2 {
     match intent {
         Intent::ChaseSoul => soul.pos,
         Intent::HoldAnchor => agent.anchor, // static fallback; the sim uses off_ball_target
+        // The carrier's straight-line default; the sim overrides it with a
+        // pressure-aware carry route in resolve_on_ball.
         Intent::CarryToGoal => goals[agent.team as usize],
-        Intent::ContestCarrier => carrier.map_or(agent.anchor, |c| c.pos),
+        // Contain: sit goal-side of the carrier (between it and its goal), so
+        // the straight route into the goal is the one the carrier's EV avoids.
+        Intent::ContestCarrier => match carrier {
+            Some(c) => {
+                let to_goal = goals[c.team as usize] - c.pos;
+                c.pos + to_goal.normalized().scale(config.pressure_containment_dist)
+            }
+            None => agent.anchor,
+        },
     }
 }
 
@@ -225,7 +236,7 @@ mod tests {
         );
         let goals = cfg.goals();
         assert_eq!(
-            target_for(Intent::CarryToGoal, &me, &soul, carrier, goals),
+            target_for(Intent::CarryToGoal, &me, &soul, carrier, goals, &cfg),
             goals[0]
         );
     }

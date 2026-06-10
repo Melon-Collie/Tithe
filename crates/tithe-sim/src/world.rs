@@ -35,6 +35,16 @@ pub struct SimConfig {
     /// How close an enemy carrier must be before a defender breaks shape to
     /// close it down (larger than strip_radius — close first, then lunge).
     pub contest_range: Fx,
+    /// How far goal-side of the carrier the pressing defender sits (containment
+    /// — take away the straight line so the carrier can't stroll through).
+    pub pressure_containment_dist: Fx,
+    /// How far ahead a carry route looks toward the goal.
+    pub carry_lookahead: Fx,
+    /// Lateral spacing of the carry-route candidates (to go around pressure).
+    pub carry_lateral: Fx,
+    /// Distance from a carry route within which a defender threatens it (the
+    /// risk that routes the carrier around pressure).
+    pub carry_contest_radius: Fx,
     /// Strip-win percent (0..100) of a maxed-Stripping defender; the actual
     /// chance scales with the defender's Stripping attribute.
     pub strip_success_max_pct: u32,
@@ -105,6 +115,10 @@ impl Default for SimConfig {
             goal_x: Fx::from_num(45),
             strip_radius: Fx::from_num(3),
             contest_range: Fx::from_num(25),
+            pressure_containment_dist: Fx::from_num(2), // within strip_radius (3): contain AND strip
+            carry_lookahead: Fx::from_num(15),
+            carry_lateral: Fx::from_num(6),
+            carry_contest_radius: Fx::from_num(7),
             strip_success_max_pct: 70, // × Stripping 0.5 = the old flat 35%
             stagger_ticks: 15,
             offering_radius: Fx::from_num(3),

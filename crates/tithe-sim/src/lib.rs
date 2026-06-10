@@ -163,7 +163,7 @@ impl Simulation {
             // harries the offer (not a strip) and there's no pass.
             if self.offering.is_none() {
                 self.resolve_strips(&mut events);
-                self.resolve_pass(&mut events);
+                self.resolve_on_ball(&mut events);
             }
         }
 
@@ -220,7 +220,7 @@ impl Simulation {
                     &self.config,
                 )
             } else {
-                decide::target_for(intent, agent, &self.soul, carrier, self.goals)
+                decide::target_for(intent, agent, &self.soul, carrier, self.goals, &self.config)
             };
             self.agents[i].target = target;
         }
@@ -397,7 +397,7 @@ impl Simulation {
     /// gains at the interception point. The best option that beats carrying (by
     /// a margin) launches the soul; the completion roll decides the outcome at
     /// release. Better passers complete more, so they pass more.
-    fn resolve_pass(&mut self, events: &mut Vec<Event>) {
+    fn resolve_on_ball(&mut self, events: &mut Vec<Event>) {
         let Possession::Held(carrier_id) = self.soul.possession else {
             return;
         };
@@ -411,12 +411,18 @@ impl Simulation {
         let enemies: Vec<Vec2> = self.team_positions(1 - team);
         let allies: Vec<Vec2> = self.team_positions(team);
 
-        // Carrying: offering value here minus the cost of being stripped.
-        let carry_value = value::value_at(carrier_pos, my_goal, &enemies, &self.config);
-        let carry_risk = Fx::from_num(1) - value::openness(carrier_pos, &enemies, &self.config);
-        let carry_cost =
-            carry_risk * value::value_at(carrier_pos, enemy_goal, &allies, &self.config) * aversion;
-        let mut best_ev = carry_value - carry_cost + self.config.pass_value_margin;
+        // Carrying: pick the best carry *route* — a waypoint toward goal whose
+        // path dodges pressure (so the carrier curves around a presser instead
+        // of strolling into the strip).
+        let (carry_target, carry_ev) = self.best_carry_route(
+            carrier_pos,
+            my_goal,
+            enemy_goal,
+            &enemies,
+            &allies,
+            aversion,
+        );
+        let mut best_ev = carry_ev + self.config.pass_value_margin;
 
         let mut chosen: Option<(u32, Fx, Option<u32>)> = None; // receiver, completion, blocker
         for agent in &self.agents {
@@ -460,7 +466,64 @@ impl Simulation {
                 to: receiver,
                 chance: pct as u8,
             });
+        } else {
+            // No worthwhile pass — carry the chosen route around the pressure.
+            self.agents[carrier_id as usize].target = carry_target;
         }
+    }
+
+    /// The best carry route: among a few waypoints toward the goal, the one with
+    /// the highest EV = value at the waypoint − path risk × what the opponent
+    /// gains, so the carrier curves around a presser instead of into it.
+    fn best_carry_route(
+        &self,
+        carrier_pos: Vec2,
+        my_goal: Vec2,
+        enemy_goal: Vec2,
+        enemies: &[Vec2],
+        allies: &[Vec2],
+        aversion: Fx,
+    ) -> (Vec2, Fx) {
+        let to_goal = my_goal - carrier_pos;
+        let unit = to_goal.normalized();
+        let look = to_goal.length().min(self.config.carry_lookahead); // don't overshoot the goal
+        let lat = self.config.carry_lateral;
+        let perp = unit.perpendicular();
+        let forward = carrier_pos + unit.scale(look);
+        let candidates = [
+            forward,
+            forward + perp.scale(lat),
+            forward - perp.scale(lat),
+            forward + perp.scale(lat + lat),
+            forward - perp.scale(lat + lat),
+        ];
+
+        let mut best = forward;
+        let mut best_ev = Fx::from_num(-9999);
+        for &waypoint in &candidates {
+            let value = value::value_at(waypoint, my_goal, enemies, &self.config);
+            // Path risk: the worst enemy sitting on the carrier→waypoint route.
+            let mut path_risk = Fx::from_num(0);
+            for &enemy in enemies {
+                let on_path = value::segment_shadow(
+                    enemy,
+                    carrier_pos,
+                    waypoint,
+                    self.config.carry_contest_radius,
+                );
+                if on_path > path_risk {
+                    path_risk = on_path;
+                }
+            }
+            let cost =
+                path_risk * value::value_at(waypoint, enemy_goal, allies, &self.config) * aversion;
+            let ev = value - cost;
+            if ev > best_ev {
+                best_ev = ev;
+                best = waypoint;
+            }
+        }
+        (best, best_ev)
     }
 
     /// Lane clearance in `[0, 1]` for a pass `from`→`to`, plus the worst lane

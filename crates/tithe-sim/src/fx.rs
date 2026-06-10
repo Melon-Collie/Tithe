@@ -65,6 +65,23 @@ impl Vec2 {
             self.scale(max / len)
         }
     }
+
+    /// A unit vector in the same direction (zero for a near-zero vector). The
+    /// epsilon keeps `1/len` from overflowing Q16.16 for tiny lengths.
+    pub fn normalized(self) -> Vec2 {
+        let len = self.length();
+        let epsilon = Fx::from_num(1) / Fx::from_num(1000); // 0.001
+        if len <= epsilon {
+            Vec2::default()
+        } else {
+            self.scale(Fx::from_num(1) / len)
+        }
+    }
+
+    /// This vector rotated 90° (the left perpendicular). Trig-free.
+    pub fn perpendicular(self) -> Vec2 {
+        Vec2::new(-self.y, self.x)
+    }
 }
 
 /// Shortest distance from point `p` to the segment `a`–`b` (endpoints clamped).
