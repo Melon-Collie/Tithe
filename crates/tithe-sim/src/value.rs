@@ -84,6 +84,31 @@ pub fn lane_clear(from: Vec2, to: Vec2, enemies: &[Vec2], config: &SimConfig) ->
     Fx::from_num(1) - max_block
 }
 
+/// How much a defender standing at `point` shadows the lane `a`→`b`: the block
+/// factor in `[0, 1]` (perpendicular distance to the segment, endpoints
+/// excluded). This is the "cover shadow" — a body in the lane reduces a pass's
+/// completion. Mirrors the per-defender block used in pass completion.
+pub fn segment_shadow(point: Vec2, a: Vec2, b: Vec2, lane_radius: Fx) -> Fx {
+    let seg = b - a;
+    let len_sq: WideFx = seg.x.wide_mul(seg.x) + seg.y.wide_mul(seg.y);
+    let zero = WideFx::from_num(0);
+    if len_sq <= zero {
+        return Fx::from_num(0);
+    }
+    let off = point - a;
+    let dot: WideFx = off.x.wide_mul(seg.x) + off.y.wide_mul(seg.y);
+    if dot <= zero || dot >= len_sq {
+        return Fx::from_num(0); // not between the endpoints — casts no shadow
+    }
+    let t = Fx::saturating_from_num(dot / len_sq);
+    let perp = point.distance_to(a + seg.scale(t));
+    if perp >= lane_radius {
+        Fx::from_num(0)
+    } else {
+        Fx::from_num(1) - perp / lane_radius
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

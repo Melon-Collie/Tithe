@@ -113,22 +113,42 @@ pub fn off_ball_target(
     enemies: &[Vec2],
     config: &SimConfig,
 ) -> Vec2 {
-    let team_has_soul = carrier.is_some_and(|c| c.team == agent.team);
+    // Loose soul: hold the anchor (the nearest agent chases it; everyone holds).
+    let Some(carrier) = carrier else {
+        return agent.anchor;
+    };
+    let attacking = carrier.team == agent.team;
     let my_goal = goals[agent.team as usize];
     let enemy_goal = goals[1 - agent.team as usize];
+
     let mut best = agent.anchor;
     let mut best_score = Fx::from_num(-1);
     for offset in candidate_offsets(config.drift_radius) {
         let candidate = agent.anchor + offset;
-        let score = if team_has_soul {
-            let reachable = match carrier {
-                Some(c) => value::lane_clear(c.pos, candidate, enemies, config),
-                None => Fx::from_num(1),
-            };
+        let score = if attacking {
+            // Be a great pass target: open, advanced, reachable from the carrier.
+            let reachable = value::lane_clear(carrier.pos, candidate, enemies, config);
             value::value_at(candidate, my_goal, enemies, config) * reachable
         } else {
-            // Highest enemy value = where they most want the soul and we aren't.
-            value::value_at(candidate, enemy_goal, allies, config)
+            // Cover-shadow the carrier's most dangerous lane: maximize the threat
+            // removed = the best (shadow × receiver xT) over enemy receivers.
+            let mut removed = Fx::from_num(0);
+            for &receiver in enemies {
+                if receiver == carrier.pos {
+                    continue; // the carrier itself, not a receiver
+                }
+                let shadow =
+                    value::segment_shadow(candidate, carrier.pos, receiver, config.lane_radius);
+                if shadow <= Fx::from_num(0) {
+                    continue;
+                }
+                let threat = value::value_at(receiver, enemy_goal, allies, config);
+                let removed_here = shadow * threat;
+                if removed_here > removed {
+                    removed = removed_here;
+                }
+            }
+            removed
         };
         if score > best_score {
             best_score = score;
