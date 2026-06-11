@@ -111,6 +111,16 @@ pub struct SimConfig {
     pub separation_radius: Fx,
     /// Maximum separation push applied per tick.
     pub separation_step: Fx,
+    /// Per-in-possession-role weighting on the carry/pass/shoot decision — the
+    /// role-tuning table (see [`RoleBiases`]).
+    pub role_biases: RoleBiases,
+}
+
+impl SimConfig {
+    /// The on-ball bias for an in-possession role (shorthand for the table).
+    pub fn on_ball_bias(&self, role: InPossessionRole) -> OnBallBias {
+        self.role_biases.for_role(role)
+    }
 }
 
 impl Default for SimConfig {
@@ -159,6 +169,27 @@ impl Default for SimConfig {
             drift_radius: Fx::from_num(10),
             separation_radius: Fx::from_num(5) / Fx::from_num(2), // 2.5 (< strip_radius 3)
             separation_step: Fx::from_num(1),
+            // The role-tuning table. Each row weights an in-possession role's
+            // carry/pass/shoot appetite (multipliers in %, the shoot gate in %
+            // score-chance). Edit a row to change how that role plays.
+            role_biases: {
+                let bias = |carry: u32, pass: u32, shoot: u32, gate: u32, drift: u32| OnBallBias {
+                    carry_mult: Fx::from_num(carry) / Fx::from_num(100),
+                    pass_mult: Fx::from_num(pass) / Fx::from_num(100),
+                    shoot_mult: Fx::from_num(shoot) / Fx::from_num(100),
+                    min_shoot_prob: Fx::from_num(gate) / Fx::from_num(100),
+                    drift_mult: Fx::from_num(drift) / Fx::from_num(100),
+                };
+                RoleBiases {
+                    //                        carry pass shoot gate drift
+                    balanced: bias(100, 100, 100, 0, 100),
+                    dangler: bias(140, 70, 90, 0, 110),
+                    playmaker: bias(90, 140, 90, 0, 100),
+                    stay_at_home: bias(40, 130, 70, 0, 40),
+                    sniper: bias(100, 90, 130, 45, 90),
+                    perimeter_shooter: bias(90, 90, 150, 0, 100),
+                }
+            },
         }
     }
 }
@@ -261,35 +292,107 @@ fn draw_attribute(rng: &mut Rng) -> Fx {
     Fx::from_num(25 + rng.below(61)) / Fx::from_num(100)
 }
 
-/// The coach's casting of a player — one of the two coach inputs (the other is
-/// the positioning template / [`Formation`]). A role is assigned *per player*
-/// (§3: recast = change a player's role).
-///
-/// **Today it is a label,** carried through to the event-stream consumers (it
-/// shows in the play-by-play roster). Role-*conditioned behavior* — the
-/// considerations and trigger verb each role implies (§1, §3) — is a later
-/// slice; this enum is the seam it will hang on. `Rover` is the neutral
-/// two-way default.
+/// A player's **in-possession** casting — what he does with the soul. One of
+/// the two role coach inputs (the other is [`OutOfPossessionRole`]). It biases
+/// the carry/pass/shoot decision via [`SimConfig::on_ball_bias`] — the same dumb
+/// EV scorer, different appetites (§2/§10: input quality, not compute). The
+/// *role* is tendency; the shooting *attributes* (Accuracy/Range) are capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    /// Up-top offering threat — the player you cast to score.
-    Finisher,
-    /// Distributor / outlet — moves the soul and finds the open receiver.
+#[serde(rename_all = "snake_case")]
+pub enum InPossessionRole {
+    /// Neutral two-way casting (the default).
+    #[default]
+    Balanced,
+    /// Wants the soul on his stick — carries, rarely gives it up.
+    Dangler,
+    /// Pass-first distributor — finds the open outlet.
     Playmaker,
+    /// Won't carry — dumps it off and holds his shape.
+    StayAtHome,
+    /// Patient finisher — only pulls the trigger on a high-% look (in tight).
+    Sniper,
+    /// Lets the long one fly — takes the shot from range.
+    PerimeterShooter,
+}
+
+/// A player's **out-of-possession** casting — what he does without the soul.
+/// A *label* this slice (carried for the watch view); role-conditioned defensive
+/// behavior arrives with the defensive-role design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutOfPossessionRole {
+    /// Neutral two-way casting (the default).
+    #[default]
+    Balanced,
     /// High closer — breaks shape to pressure the enemy carrier.
     Presser,
     /// Deep safety / help defender near its own goal.
     Anchor,
-    /// Neutral two-way player (the default casting).
-    #[default]
-    Rover,
+}
+
+/// Per-role weighting on the carry/pass/shoot decision — the whole role-tuning
+/// surface. Each field scales the *upside* of an action (never the net EV, so a
+/// role's appetite changes what it reaches for without faking away the risk).
+#[derive(Debug, Clone, Copy)]
+pub struct OnBallBias {
+    /// Scales the value of carrying (Dangler ↑, Stay-at-home ↓).
+    pub carry_mult: Fx,
+    /// Scales the value of passing (Playmaker ↑).
+    pub pass_mult: Fx,
+    /// Scales the value of shooting (Sniper/Perimeter ↑).
+    pub shoot_mult: Fx,
+    /// A shooter below this score chance won't pull the trigger (the Sniper gate,
+    /// 0 = no gate).
+    pub min_shoot_prob: Fx,
+    /// Scales off-ball drift from the anchor (Stay-at-home ↓ = hugs his shape).
+    pub drift_mult: Fx,
+}
+
+impl OnBallBias {
+    /// Neutral weighting — every multiplier 1, no shoot gate.
+    pub fn neutral() -> Self {
+        let one = Fx::from_num(1);
+        Self {
+            carry_mult: one,
+            pass_mult: one,
+            shoot_mult: one,
+            min_shoot_prob: Fx::from_num(0),
+            drift_mult: one,
+        }
+    }
+}
+
+/// The tunable per-[`InPossessionRole`] bias table (a [`SimConfig`] dial). To
+/// change how a role plays, edit its row in [`SimConfig::default`].
+#[derive(Debug, Clone, Copy)]
+pub struct RoleBiases {
+    pub balanced: OnBallBias,
+    pub dangler: OnBallBias,
+    pub playmaker: OnBallBias,
+    pub stay_at_home: OnBallBias,
+    pub sniper: OnBallBias,
+    pub perimeter_shooter: OnBallBias,
+}
+
+impl RoleBiases {
+    /// The bias for a given in-possession role.
+    pub fn for_role(&self, role: InPossessionRole) -> OnBallBias {
+        match role {
+            InPossessionRole::Balanced => self.balanced,
+            InPossessionRole::Dangler => self.dangler,
+            InPossessionRole::Playmaker => self.playmaker,
+            InPossessionRole::StayAtHome => self.stay_at_home,
+            InPossessionRole::Sniper => self.sniper,
+            InPossessionRole::PerimeterShooter => self.perimeter_shooter,
+        }
+    }
 }
 
 /// A single agent: identity (id + display `name`), team, its coach-assigned
-/// `role`, where it is, where it's headed, its **phase-conditioned** home
-/// anchors, how many ticks it remains staggered (0 = active), its stamina
-/// (1 = fresh, draining over a soul), and its attributes.
+/// roles (`attack_role` in-possession, `defend_role` out-of-possession), where
+/// it is, where it's headed, its **phase-conditioned** home anchors, how many
+/// ticks it remains staggered (0 = active), its stamina (1 = fresh, draining
+/// over a soul), and its attributes.
 ///
 /// Two coach formations give each player two homes: `attack_anchor` (used while
 /// its team holds the soul) and `defend_anchor` (used otherwise — enemy-held or
@@ -301,7 +404,8 @@ pub struct Agent {
     pub id: u32,
     pub name: String,
     pub team: u8,
-    pub role: Role,
+    pub attack_role: InPossessionRole,
+    pub defend_role: OutOfPossessionRole,
     pub pos: Vec2,
     pub target: Vec2,
     pub anchor: Vec2,
@@ -405,7 +509,8 @@ fn push_agent(agents: &mut Vec<Agent>, team: u8, anchor: Vec2, rng: &mut Rng) {
         id,
         name: format!("P{id}"),
         team,
-        role: Role::default(),
+        attack_role: InPossessionRole::default(),
+        defend_role: OutOfPossessionRole::default(),
         pos: anchor,
         target: anchor,
         anchor,

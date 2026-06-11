@@ -5,7 +5,7 @@
 //! what's left is the contests, passes, offerings, and scores, each with the
 //! probability the sim rolled against.
 
-use tithe_sim::{Event, Role};
+use tithe_sim::{Event, InPossessionRole, OutOfPossessionRole};
 
 pub fn run(args: &[String]) {
     let seed = crate::flag_or(args, "--seed", 1u64);
@@ -18,15 +18,16 @@ pub fn run(args: &[String]) {
     let names: Vec<String> = sim.agents().iter().map(|a| a.name.clone()).collect();
 
     println!("== Tithe match log (seed {seed}) ==");
-    println!("roster (role, Acc/Rng/Hand/Strip/Cont/Pass 0–99):");
+    println!("roster (attack/defend role, Acc/Rng/Hand/Strip/Cont/Pass 0–99):");
     for a in sim.agents() {
         let at = &a.attributes;
         let pct = |f: tithe_sim::Fx| (f * tithe_sim::Fx::from_num(100)).to_num::<u32>();
         println!(
-            "  {:<8} team{} {:<9} A{:>2} R{:>2} H{:>2} S{:>2} C{:>2} P{:>2}",
+            "  {:<8} team{} {:<9}/{:<8} A{:>2} R{:>2} H{:>2} S{:>2} C{:>2} P{:>2}",
             a.name,
             a.team,
-            role_label(a.role),
+            attack_label(a.attack_role),
+            defend_label(a.defend_role),
             pct(at.accuracy),
             pct(at.range),
             pct(at.handling),
@@ -57,14 +58,24 @@ fn name_of(names: &[String], id: u32) -> String {
         .unwrap_or_else(|| format!("P{id}"))
 }
 
-/// A short human label for a role.
-fn role_label(role: Role) -> &'static str {
+/// A short human label for an in-possession role.
+fn attack_label(role: InPossessionRole) -> &'static str {
     match role {
-        Role::Finisher => "finisher",
-        Role::Playmaker => "playmaker",
-        Role::Presser => "presser",
-        Role::Anchor => "anchor",
-        Role::Rover => "rover",
+        InPossessionRole::Balanced => "balanced",
+        InPossessionRole::Dangler => "dangler",
+        InPossessionRole::Playmaker => "playmaker",
+        InPossessionRole::StayAtHome => "stay-home",
+        InPossessionRole::Sniper => "sniper",
+        InPossessionRole::PerimeterShooter => "perimeter",
+    }
+}
+
+/// A short human label for an out-of-possession role.
+fn defend_label(role: OutOfPossessionRole) -> &'static str {
+    match role {
+        OutOfPossessionRole::Balanced => "balanced",
+        OutOfPossessionRole::Presser => "presser",
+        OutOfPossessionRole::Anchor => "anchor",
     }
 }
 

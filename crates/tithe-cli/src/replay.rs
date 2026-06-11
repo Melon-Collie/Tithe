@@ -5,7 +5,7 @@
 //! viewer template.
 
 use serde::Serialize;
-use tithe_sim::{Event, MatchSetup, Possession, Role, Vec2};
+use tithe_sim::{Event, InPossessionRole, MatchSetup, OutOfPossessionRole, Possession, Vec2};
 
 const TEMPLATE: &str = include_str!("../viewer/template.html");
 
@@ -30,7 +30,8 @@ struct AgentMeta {
     id: u32,
     name: String,
     team: u8,
-    role: Role,
+    attack_role: InPossessionRole,
+    defend_role: OutOfPossessionRole,
 }
 
 #[derive(Serialize)]
@@ -74,7 +75,8 @@ fn build_export(setup: &Option<MatchSetup>, seed: u64, max_ticks: u64) -> MatchE
             id: a.id,
             name: a.name.clone(),
             team: a.team,
-            role: a.role,
+            attack_role: a.attack_role,
+            defend_role: a.defend_role,
         })
         .collect();
 

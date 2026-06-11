@@ -132,9 +132,12 @@ pub fn off_ball_target(
     let my_goal = goals[agent.team as usize];
     let enemy_goal = goals[1 - agent.team as usize];
 
+    // The role's drift appetite tightens or loosens how far it shades off its
+    // anchor (Stay-at-home hugs his shape; Dangler roams).
+    let drift = config.drift_radius * config.on_ball_bias(agent.attack_role).drift_mult;
     let mut best = agent.anchor;
     let mut best_score = Fx::from_num(-1);
-    for offset in candidate_offsets(config.drift_radius) {
+    for offset in candidate_offsets(drift) {
         let candidate = agent.anchor + offset;
         let score = if attacking {
             // Be a great pass target: open, advanced, reachable from the carrier.
@@ -190,7 +193,7 @@ fn candidate_offsets(drift: Fx) -> [Vec2; 9] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::{Attributes, Possession, Role};
+    use crate::world::{Attributes, InPossessionRole, OutOfPossessionRole, Possession};
 
     fn agent(id: u32, team: u8, x: i32, y: i32) -> Agent {
         let anchor = Vec2::new(Fx::from_num(99), Fx::from_num(0));
@@ -198,7 +201,8 @@ mod tests {
             id,
             name: format!("P{id}"),
             team,
-            role: Role::default(),
+            attack_role: InPossessionRole::default(),
+            defend_role: OutOfPossessionRole::default(),
             pos: Vec2::new(Fx::from_num(x), Fx::from_num(y)),
             target: Vec2::default(),
             anchor,

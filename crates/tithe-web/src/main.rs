@@ -18,7 +18,9 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
-use tithe_sim::{Event, MatchSetup, Possession, Role, Simulation, Vec2};
+use tithe_sim::{
+    Event, InPossessionRole, MatchSetup, OutOfPossessionRole, Possession, Simulation, Vec2,
+};
 
 /// The single-page UI (formation editor + playback viewer), served at `/`.
 const INDEX_HTML: &str = include_str!("../web/index.html");
@@ -90,7 +92,8 @@ struct AgentMeta {
     id: u32,
     name: String,
     team: u8,
-    role: Role,
+    attack_role: InPossessionRole,
+    defend_role: OutOfPossessionRole,
 }
 
 #[derive(Serialize)]
@@ -140,7 +143,8 @@ fn build_export(
             id: a.id,
             name: a.name.clone(),
             team: a.team,
-            role: a.role,
+            attack_role: a.attack_role,
+            defend_role: a.defend_role,
         })
         .collect();
 

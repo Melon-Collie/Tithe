@@ -50,8 +50,8 @@ pub use event::Event;
 pub use fx::{Fx, Vec2, WideFx};
 pub use rng::Rng;
 pub use setup::{MatchSetup, SetupError};
-pub use world::Role;
 pub use world::{Agent, Formation, Possession, SimConfig, Soul};
+pub use world::{InPossessionRole, OutOfPossessionRole};
 
 /// Opaque seed for a simulation run. Same seed + same inputs → same event
 /// stream, on every platform and every replay.
@@ -443,6 +443,11 @@ impl Simulation {
         let my_goal = self.goals[team as usize];
         let enemy_goal = self.goals[1 - team as usize];
         let attrs = self.agents[carrier_id as usize].attributes;
+        // The carrier's in-possession role tilts what he reaches for (carry/pass/
+        // shoot appetite) — same scorer, different weights.
+        let bias = self
+            .config
+            .on_ball_bias(self.agents[carrier_id as usize].attack_role);
         let aversion = self.config.turnover_aversion;
         let zero = Fx::from_num(0);
         let one = Fx::from_num(1);
@@ -450,23 +455,26 @@ impl Simulation {
         let enemies: Vec<Vec2> = self.team_positions(1 - team);
         let allies: Vec<Vec2> = self.team_positions(team);
 
-        // Carrying: the best route toward goal that dodges pressure.
+        // Carrying: the best route toward goal that dodges pressure (the carry's
+        // value scaled by the role's appetite — Dangler ↑, Stay-at-home ↓).
         let (carry_target, carry_ev) = self.best_carry_route(
             carrier_pos,
             my_goal,
             enemy_goal,
             &enemies,
             &allies,
-            aversion,
+            bias.carry_mult,
         );
 
         // Shooting from here: score chance falls off with distance (further for
         // high-Range players), against what a missed shot's rebound concedes.
+        // The role scales the appetite; a patient role won't fire below its bar.
         let distance = carrier_pos.distance_to(my_goal);
         let shoot_contest = self.offering_contest(team, carrier_pos);
         let shoot_prob =
             self.shot_probability(distance, attrs.accuracy, attrs.range, shoot_contest);
-        let shoot_ev = shoot_prob * self.config.shot_value
+        let can_shoot = shoot_prob >= bias.min_shoot_prob;
+        let shoot_ev = shoot_prob * self.config.shot_value * bias.shoot_mult
             - (one - shoot_prob)
                 * value::value_at(carrier_pos, enemy_goal, &allies, &self.config)
                 * aversion;
@@ -487,7 +495,9 @@ impl Simulation {
             if completion < self.config.pass_min_lane {
                 continue;
             }
-            let benefit = value::value_at(agent.pos, my_goal, &enemies, &self.config) * completion;
+            let benefit = value::value_at(agent.pos, my_goal, &enemies, &self.config)
+                * completion
+                * bias.pass_mult;
             let loss_point = blocker.map_or(agent.pos, |b| self.agents[b as usize].pos);
             let cost = (one - completion)
                 * value::value_at(loss_point, enemy_goal, &allies, &self.config)
@@ -499,8 +509,8 @@ impl Simulation {
         }
         let best_pass_ev = best_pass.map_or(Fx::from_num(-9999), |(_, _, _, e)| e);
 
-        // Shoot if it's the best positive option…
-        if shoot_ev > zero && shoot_ev >= carry_ev && shoot_ev >= best_pass_ev {
+        // Shoot if it's allowed (past the role's gate) and the best positive option…
+        if can_shoot && shoot_ev > zero && shoot_ev >= carry_ev && shoot_ev >= best_pass_ev {
             self.offering = Some(OfferState {
                 carrier: carrier_id,
                 ticks_left: self.config.offering_windup,
@@ -535,8 +545,9 @@ impl Simulation {
     }
 
     /// The best carry route: among a few waypoints toward the goal, the one with
-    /// the highest EV = value at the waypoint − path risk × what the opponent
-    /// gains, so the carrier curves around a presser instead of into it.
+    /// the highest EV = (value at the waypoint × the role's carry appetite) −
+    /// path risk × what the opponent gains, so the carrier curves around a
+    /// presser instead of into it.
     fn best_carry_route(
         &self,
         carrier_pos: Vec2,
@@ -544,8 +555,9 @@ impl Simulation {
         enemy_goal: Vec2,
         enemies: &[Vec2],
         allies: &[Vec2],
-        aversion: Fx,
+        value_mult: Fx,
     ) -> (Vec2, Fx) {
+        let aversion = self.config.turnover_aversion;
         let to_goal = my_goal - carrier_pos;
         let unit = to_goal.normalized();
         let look = to_goal.length().min(self.config.carry_lookahead); // don't overshoot the goal
@@ -563,7 +575,7 @@ impl Simulation {
         let mut best = forward;
         let mut best_ev = Fx::from_num(-9999);
         for &waypoint in &candidates {
-            let value = value::value_at(waypoint, my_goal, enemies, &self.config);
+            let value = value::value_at(waypoint, my_goal, enemies, &self.config) * value_mult;
             // Path risk: the worst enemy sitting on the carrier→waypoint route.
             let mut path_risk = Fx::from_num(0);
             for &enemy in enemies {

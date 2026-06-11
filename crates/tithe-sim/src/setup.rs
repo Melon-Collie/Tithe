@@ -25,7 +25,7 @@
 //! [`SimConfig::default`]: crate::SimConfig
 
 use crate::fx::{Fx, Vec2};
-use crate::world::{Agent, Attributes, Role};
+use crate::world::{Agent, Attributes, InPossessionRole, OutOfPossessionRole};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -69,8 +69,12 @@ pub struct TeamSetup {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerSetup {
     pub name: String,
+    /// What he does with the soul (in-possession casting).
     #[serde(default)]
-    pub role: Role,
+    pub attack_role: InPossessionRole,
+    /// What he does without it (out-of-possession casting).
+    #[serde(default)]
+    pub defend_role: OutOfPossessionRole,
     pub accuracy: u8,
     pub range: u8,
     pub handling: u8,
@@ -188,7 +192,8 @@ pub fn build_agents(setup: &MatchSetup) -> Result<Vec<Agent>, SetupError> {
                 id,
                 name: player.name.clone(),
                 team: team_idx as u8,
-                role: player.role,
+                attack_role: player.attack_role,
+                defend_role: player.defend_role,
                 // Faceoff soul is loose → out-of-possession → defending shape.
                 pos: defend_anchor,
                 target: defend_anchor,
@@ -252,6 +257,8 @@ impl MatchSetup {
     /// writes out and what the setup tests build against — a concrete stand-in
     /// for the game's tactics + roster screens.
     pub fn default_match() -> Self {
+        use InPossessionRole as IP;
+        use OutOfPossessionRole as OP;
         let mut formations = BTreeMap::new();
         // In-possession: slide toward -x (own goal) to offer — finisher parked
         // at the scoring spot, pressers up as support, anchor stepped up.
@@ -291,26 +298,32 @@ impl MatchSetup {
                 example_team(
                     "Embers",
                     &[
-                        // [accuracy, range, handling, stripping, contesting, passing]
-                        ("Vale", Role::Anchor, [20, 20, 35, 70, 65, 45]),
-                        ("Crane", Role::Rover, [45, 45, 50, 50, 50, 55]),
-                        ("Ash", Role::Playmaker, [40, 35, 65, 35, 55, 80]),
-                        ("Rook", Role::Rover, [50, 45, 50, 55, 50, 50]),
-                        ("Pyre", Role::Presser, [50, 35, 40, 65, 60, 35]),
-                        ("Sear", Role::Finisher, [85, 30, 55, 30, 40, 50]), // interior finisher
-                        ("Knell", Role::Presser, [45, 40, 40, 60, 65, 40]),
+                        // (name, attack_role, defend_role,
+                        //  [accuracy, range, handling, stripping, contesting, passing])
+                        ("Vale", IP::StayAtHome, OP::Anchor, [20, 20, 35, 70, 65, 45]),
+                        ("Crane", IP::Dangler, OP::Balanced, [45, 45, 50, 50, 50, 55]),
+                        ("Ash", IP::Playmaker, OP::Balanced, [40, 35, 65, 35, 55, 80]),
+                        ("Rook", IP::Balanced, OP::Balanced, [50, 45, 50, 55, 50, 50]),
+                        ("Pyre", IP::Balanced, OP::Presser, [50, 35, 40, 65, 60, 35]),
+                        ("Sear", IP::Sniper, OP::Balanced, [85, 30, 55, 30, 40, 50]), // interior
+                        ("Knell", IP::Balanced, OP::Presser, [45, 40, 40, 60, 65, 40]),
                     ],
                 ),
                 example_team(
                     "Wardens",
                     &[
-                        ("Holt", Role::Anchor, [25, 25, 35, 75, 60, 40]),
-                        ("Bram", Role::Rover, [50, 45, 50, 50, 50, 55]),
-                        ("Fen", Role::Playmaker, [45, 40, 70, 40, 50, 75]),
-                        ("Cole", Role::Rover, [50, 50, 50, 50, 55, 50]),
-                        ("Dane", Role::Presser, [50, 35, 40, 60, 65, 35]),
-                        ("Gar", Role::Finisher, [55, 85, 55, 35, 45, 55]), // perimeter shooter
-                        ("Ward", Role::Presser, [45, 40, 40, 65, 60, 45]),
+                        ("Holt", IP::StayAtHome, OP::Anchor, [25, 25, 35, 75, 60, 40]),
+                        ("Bram", IP::Dangler, OP::Balanced, [50, 45, 50, 50, 50, 55]),
+                        ("Fen", IP::Playmaker, OP::Balanced, [45, 40, 70, 40, 50, 75]),
+                        ("Cole", IP::Balanced, OP::Balanced, [50, 50, 50, 50, 55, 50]),
+                        ("Dane", IP::Balanced, OP::Presser, [50, 35, 40, 60, 65, 35]),
+                        (
+                            "Gar",
+                            IP::PerimeterShooter,
+                            OP::Balanced,
+                            [55, 85, 55, 35, 45, 55],
+                        ), // perimeter
+                        ("Ward", IP::Balanced, OP::Presser, [45, 40, 40, 65, 60, 45]),
                     ],
                 ),
             ],
@@ -318,11 +331,14 @@ impl MatchSetup {
     }
 }
 
-/// Build an example team from compact
-/// `(name, role, [accuracy, range, handling, stripping, contesting, passing])`
-/// tuples — keeps [`MatchSetup::default_match`] readable. Both teams field the
-/// shared `high-push` / `low-block` phase shapes.
-fn example_team(name: &str, players: &[(&str, Role, [u8; 6])]) -> TeamSetup {
+/// Build an example team from compact `(name, attack_role, defend_role,
+/// [accuracy, range, handling, stripping, contesting, passing])` tuples — keeps
+/// [`MatchSetup::default_match`] readable. Both teams field the shared
+/// `high-push` / `low-block` phase shapes.
+fn example_team(
+    name: &str,
+    players: &[(&str, InPossessionRole, OutOfPossessionRole, [u8; 6])],
+) -> TeamSetup {
     TeamSetup {
         name: name.to_string(),
         attack_formation: "high-push".to_string(),
@@ -330,10 +346,16 @@ fn example_team(name: &str, players: &[(&str, Role, [u8; 6])]) -> TeamSetup {
         players: players
             .iter()
             .map(
-                |(pname, role, [accuracy, range, handling, stripping, contesting, passing])| {
+                |(
+                    pname,
+                    attack_role,
+                    defend_role,
+                    [accuracy, range, handling, stripping, contesting, passing],
+                )| {
                     PlayerSetup {
                         name: (*pname).to_string(),
-                        role: *role,
+                        attack_role: *attack_role,
+                        defend_role: *defend_role,
                         accuracy: *accuracy,
                         range: *range,
                         handling: *handling,
@@ -364,9 +386,9 @@ mod tests {
     #[test]
     fn authored_attributes_and_metadata_carry_through() {
         let agents = build_agents(&MatchSetup::default_match()).expect("valid setup");
-        // Sear: accuracy 85 → 0.85, role Finisher, name preserved.
+        // Sear: accuracy 85 → 0.85, attack role Sniper, name preserved.
         let sear = agents.iter().find(|a| a.name == "Sear").expect("Sear");
-        assert_eq!(sear.role, Role::Finisher);
+        assert_eq!(sear.attack_role, InPossessionRole::Sniper);
         assert_eq!(
             sear.attributes.accuracy,
             Fx::from_num(85) / Fx::from_num(100)
