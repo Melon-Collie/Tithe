@@ -46,9 +46,12 @@ pub struct SimConfig {
     /// Distance from a carry route within which a defender threatens it (the
     /// risk that routes the carrier around pressure).
     pub carry_contest_radius: Fx,
-    /// Strip-win percent (0..100) of a maxed-Stripping defender; the actual
-    /// chance scales with the defender's Stripping attribute.
-    pub strip_success_max_pct: u32,
+    /// Strip-win percent when defender Stripping equals carrier Handling — the
+    /// even-match baseline the attribute gap swings around.
+    pub strip_even_pct: Fx,
+    /// Percentage points the strip chance shifts per unit of `Stripping −
+    /// Handling` gap (the gap is in `[-1, 1]`).
+    pub strip_spread_pct: Fx,
     /// Ticks a whiffed defender is staggered (beaten, can't act).
     pub stagger_ticks: u32,
     /// Ticks an offering takes to resolve (the wind-up defenders can arrive in).
@@ -126,7 +129,8 @@ impl Default for SimConfig {
             carry_lookahead: Fx::from_num(15),
             carry_lateral: Fx::from_num(6),
             carry_contest_radius: Fx::from_num(7),
-            strip_success_max_pct: 70, // × Stripping 0.5 = the old flat 35%
+            strip_even_pct: Fx::from_num(50), // even Stripping vs Handling ≈ coin flip
+            strip_spread_pct: Fx::from_num(60), // a 0.2 attribute edge ≈ ±12 points
             stagger_ticks: 15,
             offering_windup: 8,
             offering_base: Fx::from_num(4) / Fx::from_num(10), // 0.4
@@ -199,10 +203,11 @@ impl Formation {
 
 /// Per-player capabilities. A stat exists only because some sim step consumes
 /// it (§4): shooting splits into `accuracy` (point-blank conversion quality) and
-/// `range` (how far that quality holds up — the perimeter threat); `stripping`
-/// → strip-the-carrier success; `contesting` → pass interception + offering
-/// contest (and the lane area a defender covers); `passing` → pass completion.
-/// All in `[0, 1]`.
+/// `range` (how far that quality holds up — the perimeter threat); `handling`
+/// → resists a strip (the carrier's side of the strip contest); `stripping`
+/// → strip-the-carrier success (the defender's side); `contesting` → pass
+/// interception + offering contest (and the lane area a defender covers);
+/// `passing` → pass completion. All in `[0, 1]`.
 #[derive(Debug, Clone, Copy)]
 pub struct Attributes {
     /// Point-blank shot conversion quality (the high-Accuracy interior finisher).
@@ -210,6 +215,9 @@ pub struct Attributes {
     /// How slowly shot success falls off with distance — a high-Range player
     /// stays a threat from the perimeter.
     pub range: Fx,
+    /// Protects the soul against a strip — the carrier's side of the strip
+    /// contest. A high-Handling carrier keeps it through pressure.
+    pub handling: Fx,
     pub stripping: Fx,
     pub contesting: Fx,
     /// Raises a passer's completion chance — better passers complete more, so
@@ -225,6 +233,7 @@ impl Attributes {
         Self {
             accuracy: mid,
             range: mid,
+            handling: mid,
             stripping: mid,
             contesting: mid,
             passing: mid,
@@ -239,6 +248,7 @@ impl Attributes {
         Self {
             accuracy: draw_attribute(rng),
             range: draw_attribute(rng),
+            handling: draw_attribute(rng),
             stripping: draw_attribute(rng),
             contesting: draw_attribute(rng),
             passing: draw_attribute(rng),

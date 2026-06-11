@@ -73,6 +73,7 @@ pub struct PlayerSetup {
     pub role: Role,
     pub accuracy: u8,
     pub range: u8,
+    pub handling: u8,
     pub stripping: u8,
     pub contesting: u8,
     pub passing: u8,
@@ -95,6 +96,7 @@ impl PlayerSetup {
         Ok(Attributes {
             accuracy: one("accuracy", self.accuracy)?,
             range: one("range", self.range)?,
+            handling: one("handling", self.handling)?,
             stripping: one("stripping", self.stripping)?,
             contesting: one("contesting", self.contesting)?,
             passing: one("passing", self.passing)?,
@@ -289,26 +291,26 @@ impl MatchSetup {
                 example_team(
                     "Embers",
                     &[
-                        // [accuracy, range, stripping, contesting, passing]
-                        ("Vale", Role::Anchor, [20, 20, 70, 65, 45]),
-                        ("Crane", Role::Rover, [45, 45, 50, 50, 55]),
-                        ("Ash", Role::Playmaker, [40, 35, 35, 55, 80]),
-                        ("Rook", Role::Rover, [50, 45, 55, 50, 50]),
-                        ("Pyre", Role::Presser, [50, 35, 65, 60, 35]),
-                        ("Sear", Role::Finisher, [85, 30, 30, 40, 50]), // interior finisher
-                        ("Knell", Role::Presser, [45, 40, 60, 65, 40]),
+                        // [accuracy, range, handling, stripping, contesting, passing]
+                        ("Vale", Role::Anchor, [20, 20, 35, 70, 65, 45]),
+                        ("Crane", Role::Rover, [45, 45, 50, 50, 50, 55]),
+                        ("Ash", Role::Playmaker, [40, 35, 65, 35, 55, 80]),
+                        ("Rook", Role::Rover, [50, 45, 50, 55, 50, 50]),
+                        ("Pyre", Role::Presser, [50, 35, 40, 65, 60, 35]),
+                        ("Sear", Role::Finisher, [85, 30, 55, 30, 40, 50]), // interior finisher
+                        ("Knell", Role::Presser, [45, 40, 40, 60, 65, 40]),
                     ],
                 ),
                 example_team(
                     "Wardens",
                     &[
-                        ("Holt", Role::Anchor, [25, 25, 75, 60, 40]),
-                        ("Bram", Role::Rover, [50, 45, 50, 50, 55]),
-                        ("Fen", Role::Playmaker, [45, 40, 40, 50, 75]),
-                        ("Cole", Role::Rover, [50, 50, 50, 55, 50]),
-                        ("Dane", Role::Presser, [50, 35, 60, 65, 35]),
-                        ("Gar", Role::Finisher, [55, 85, 35, 45, 55]), // perimeter shooter
-                        ("Ward", Role::Presser, [45, 40, 65, 60, 45]),
+                        ("Holt", Role::Anchor, [25, 25, 35, 75, 60, 40]),
+                        ("Bram", Role::Rover, [50, 45, 50, 50, 50, 55]),
+                        ("Fen", Role::Playmaker, [45, 40, 70, 40, 50, 75]),
+                        ("Cole", Role::Rover, [50, 50, 50, 50, 55, 50]),
+                        ("Dane", Role::Presser, [50, 35, 40, 60, 65, 35]),
+                        ("Gar", Role::Finisher, [55, 85, 55, 35, 45, 55]), // perimeter shooter
+                        ("Ward", Role::Presser, [45, 40, 40, 65, 60, 45]),
                     ],
                 ),
             ],
@@ -317,10 +319,10 @@ impl MatchSetup {
 }
 
 /// Build an example team from compact
-/// `(name, role, [accuracy, range, stripping, contesting, passing])` tuples —
-/// keeps [`MatchSetup::default_match`] readable. Both teams field the shared
-/// `high-push` / `low-block` phase shapes.
-fn example_team(name: &str, players: &[(&str, Role, [u8; 5])]) -> TeamSetup {
+/// `(name, role, [accuracy, range, handling, stripping, contesting, passing])`
+/// tuples — keeps [`MatchSetup::default_match`] readable. Both teams field the
+/// shared `high-push` / `low-block` phase shapes.
+fn example_team(name: &str, players: &[(&str, Role, [u8; 6])]) -> TeamSetup {
     TeamSetup {
         name: name.to_string(),
         attack_formation: "high-push".to_string(),
@@ -328,14 +330,17 @@ fn example_team(name: &str, players: &[(&str, Role, [u8; 5])]) -> TeamSetup {
         players: players
             .iter()
             .map(
-                |(pname, role, [accuracy, range, stripping, contesting, passing])| PlayerSetup {
-                    name: (*pname).to_string(),
-                    role: *role,
-                    accuracy: *accuracy,
-                    range: *range,
-                    stripping: *stripping,
-                    contesting: *contesting,
-                    passing: *passing,
+                |(pname, role, [accuracy, range, handling, stripping, contesting, passing])| {
+                    PlayerSetup {
+                        name: (*pname).to_string(),
+                        role: *role,
+                        accuracy: *accuracy,
+                        range: *range,
+                        handling: *handling,
+                        stripping: *stripping,
+                        contesting: *contesting,
+                        passing: *passing,
+                    }
                 },
             )
             .collect(),

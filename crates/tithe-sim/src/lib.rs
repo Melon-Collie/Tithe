@@ -258,10 +258,11 @@ impl Simulation {
 
     /// Resolve committed strips in id order. A defender within `strip_radius` of
     /// an enemy carrier lunges: a win turns the soul over (and ends the contest
-    /// for this window); a whiff staggers the defender.
+    /// for this window); a whiff staggers the defender. The win chance is an
+    /// **opposed contest** — the defender's Stripping against the carrier's
+    /// Handling, swinging around the even-match baseline.
     fn resolve_strips(&mut self, events: &mut Vec<Event>) {
         let strip_radius = self.config.strip_radius;
-        let strip_max = Fx::from_num(self.config.strip_success_max_pct);
         let stagger_ticks = self.config.stagger_ticks;
 
         for i in 0..self.agents.len() {
@@ -281,8 +282,13 @@ impl Simulation {
             }
 
             let defender_id = self.agents[i].id;
-            // Strip-win chance scales with the defender's Stripping attribute.
-            let success_pct = (self.agents[i].attributes.stripping * strip_max).to_num::<u64>();
+            // Opposed contest: baseline + (Stripping − Handling) × spread, in
+            // percentage points, always leaving a slim chance either way.
+            let gap =
+                self.agents[i].attributes.stripping - self.agents[carrier_idx].attributes.handling;
+            let pct = (self.config.strip_even_pct + gap * self.config.strip_spread_pct)
+                .clamp(Fx::from_num(5), Fx::from_num(95));
+            let success_pct = pct.to_num::<u64>();
             let chance = success_pct as u8;
             if self.rng.below(100) < success_pct {
                 self.soul.possession = Possession::Held(defender_id);
