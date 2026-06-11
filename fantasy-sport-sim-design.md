@@ -1,5 +1,7 @@
 # Tithe — Design Doc
 
+> **Intent/mindset snapshot, not a behavior spec.** This captures the original design grain and the *why*; it has drifted from how the code now behaves and isn't kept in lockstep with it. The code and its tests in `crates/tithe-sim` are authoritative on behavior — verify there, never audit code against this doc. See `CLAUDE.md` → *Source of truth*.
+
 *Working draft. **Tithe** is a pure-manager sim for an invented ball sport — box-lacrosse bones under a fire-and-souls fiction — where the whole game is reading shapes, building identity, and out-coaching the league. The sport and the game share the name.*
 
 ---
