@@ -223,6 +223,13 @@ impl Simulation {
         let nearest = self.nearest_to_soul();
 
         for i in 0..self.agents.len() {
+            // Commit this window's phase: attacking shape if my team holds the
+            // soul, defending shape otherwise (enemy-held or loose). The anchor
+            // flips here on the slow clock, so the team morphs between shapes at
+            // the decision boundary, never mid-motion.
+            let in_possession = carrier.is_some_and(|c| c.team == self.agents[i].team);
+            self.agents[i].apply_phase(in_possession);
+
             let is_nearest = nearest[self.agents[i].team as usize] == Some(self.agents[i].id);
             let intent = decide::choose_intent(
                 &self.agents[i],
@@ -701,10 +708,14 @@ impl Simulation {
     /// Reset between souls: a fresh loose soul at center, every agent back on
     /// its anchor and recovered. (The §1 "round" boundary; in the full game
     /// this is also the manager's substitution beat.)
+    ///
+    /// The soul starts loose, so both teams set up out-of-possession — agents
+    /// face off from their defending shape.
     fn reset_for_next_soul(&mut self) {
         self.soul = Soul::loose_at(Vec2::default());
         self.offering = None;
         for agent in self.agents.iter_mut() {
+            agent.apply_phase(false); // loose soul → defending shape
             agent.pos = agent.anchor;
             agent.target = agent.anchor;
             agent.stagger = 0;

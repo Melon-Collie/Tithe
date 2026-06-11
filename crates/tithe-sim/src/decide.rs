@@ -193,6 +193,7 @@ mod tests {
     use crate::world::{Attributes, Possession, Role};
 
     fn agent(id: u32, team: u8, x: i32, y: i32) -> Agent {
+        let anchor = Vec2::new(Fx::from_num(99), Fx::from_num(0));
         Agent {
             id,
             name: format!("P{id}"),
@@ -200,7 +201,9 @@ mod tests {
             role: Role::default(),
             pos: Vec2::new(Fx::from_num(x), Fx::from_num(y)),
             target: Vec2::default(),
-            anchor: Vec2::new(Fx::from_num(99), Fx::from_num(0)),
+            anchor,
+            attack_anchor: anchor,
+            defend_anchor: anchor,
             stagger: 0,
             stamina: Fx::from_num(1),
             attributes: Attributes::uniform(),

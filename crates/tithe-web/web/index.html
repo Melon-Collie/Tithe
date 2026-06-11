@@ -15,15 +15,21 @@
     button { background: #2a2a2a; color: #ddd; border: 1px solid #444; padding: 6px 12px; border-radius: 5px; cursor: pointer; }
     button:hover { background: #353535; }
     button.primary { background: var(--soul); color: #222; border-color: var(--soul); font-weight: 700; }
+    .tabs { display: flex; gap: 4px; }
+    .tab { background: #222; border: 1px solid #444; padding: 6px 16px; border-radius: 5px 5px 0 0; cursor: pointer; color: #aaa; }
+    .tab.active { background: #333; color: #fff; border-bottom-color: #333; font-weight: 600; }
     .t0 { color: var(--t0); font-weight: 600; }
     .t1 { color: var(--t1); font-weight: 600; }
     #status { min-height: 18px; color: #9aa; }
-    #rosters { display: flex; gap: 28px; font-size: 12px; }
-    #rosters table { border-collapse: collapse; }
-    #rosters td { padding: 1px 6px; }
+    .boards { display: flex; gap: 16px; align-items: flex-start; }
+    .board { display: flex; flex-direction: column; gap: 6px; }
+    .board h2 { font-size: 14px; margin: 0; }
+    .roster { font-size: 11px; }
+    .roster table { border-collapse: collapse; width: 100%; }
+    .roster td { padding: 1px 5px; }
     .hint { color: #777; font-size: 12px; }
-    #viewer-section { display: none; flex-direction: column; align-items: center; gap: 8px; margin-top: 6px; }
     .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; }
+    #viewer-section { display: none; flex-direction: column; align-items: center; gap: 8px; margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -31,12 +37,26 @@
   <div class="row">
     <label>seed <input id="seed" type="number" value="3" style="width: 70px" /></label>
     <button id="run" class="primary">▶ Run match</button>
-    <button id="reset">Reset formation</button>
+    <button id="reset">Reset</button>
     <span id="status"></span>
   </div>
-  <p class="hint">Drag any player to reposition. <span class="t0">Embers</span> attack the left goal, <span class="t1">Wardens</span> the right.</p>
-  <canvas id="editor" width="920" height="540"></canvas>
-  <div id="rosters"></div>
+  <div class="tabs">
+    <div class="tab active" id="tab-attack">In possession</div>
+    <div class="tab" id="tab-defend">Out of possession</div>
+  </div>
+  <p class="hint">Editing the <b id="phase-name">attacking</b> shape. Drag any player to reposition. Each team attacks toward its own goal (the ring in its colour).</p>
+  <div class="boards">
+    <div class="board">
+      <h2 class="t0" id="name0">Embers</h2>
+      <canvas id="ed0" width="452" height="300"></canvas>
+      <div class="roster" id="roster0"></div>
+    </div>
+    <div class="board">
+      <h2 class="t1" id="name1">Wardens</h2>
+      <canvas id="ed1" width="452" height="300"></canvas>
+      <div class="roster" id="roster1"></div>
+    </div>
+  </div>
 
   <div id="viewer-section">
     <div class="row">
@@ -56,9 +76,9 @@
   const teamColor = t => (t === 0 ? '#e8643c' : '#4c9be8');
   const roleAbbr = r => ({ finisher:'FIN', playmaker:'PLY', presser:'PRS', anchor:'ANC', rover:'ROV' }[r] || r);
 
-  // A field<->screen mapping for a canvas (shared by editor and viewer).
+  // A field<->screen mapping for a canvas (shared by the boards and the viewer).
   function field(canvas) {
-    const m = 40;
+    const m = 26;
     const scale = Math.min((canvas.width - 2*m) / (ARENA.half_x*2), (canvas.height - 2*m) / (ARENA.half_y*2));
     return {
       scale,
@@ -79,110 +99,127 @@
     ctx.beginPath(); ctx.moveTo(canvas.width/2, f.sy(ARENA.half_y)); ctx.lineTo(canvas.width/2, f.sy(-ARENA.half_y)); ctx.stroke();
     for (const [gx, team] of [[-ARENA.goal_x, 0], [ARENA.goal_x, 1]]) {
       ctx.strokeStyle = teamColor(team); ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(f.sx(gx), f.sy(0), 12, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(f.sx(gx), f.sy(0), 10, 0, Math.PI*2); ctx.stroke();
     }
   }
 
   // ---- editor state ----------------------------------------------------------
-  // editTeams[t] = { name, players:[{ name, role, fin, strip, cont, pass, x, y }] }
-  // Positions x,y are absolute field coords (what's drawn). Team 1 is stored in
-  // the sim mirrored across x, so we mirror on load and again on export.
+  // editTeams[t] = { name, players:[{ name, role, fin, strip, cont, pass,
+  //                                   attack:{x,y}, defend:{x,y} }] }
+  // Positions are absolute field coords (what's drawn). Team 1 is stored in the
+  // sim mirrored across x, so we mirror on load and again on export.
   let editTeams = [];
-  const ed = document.getElementById('editor');
-  const edCtx = ed.getContext('2d');
-  const edF = field(ed);
+  let phase = 'attack'; // which shape the tabs are editing
+
+  const boards = [
+    { team: 0, canvas: document.getElementById('ed0') },
+    { team: 1, canvas: document.getElementById('ed1') },
+  ];
+  boards.forEach(b => { b.ctx = b.canvas.getContext('2d'); b.f = field(b.canvas); });
 
   async function loadDefault() {
     const setup = await (await fetch('/api/default-setup')).json();
-    editTeams = setup.teams.map((team, ti) => {
-      const slots = setup.formations[team.formation].slots;
+    editTeams = setup.teams.map((team, t) => {
+      const A = setup.formations[team.attack_formation].slots;
+      const D = setup.formations[team.defend_formation].slots;
+      const mir = slot => ({ x: t === 0 ? slot[0] : -slot[0], y: slot[1] });
+      document.getElementById('name' + t).textContent = team.name;
       return {
         name: team.name,
         players: team.players.map((p, i) => ({
           name: p.name, role: p.role,
           fin: p.finishing, strip: p.stripping, cont: p.contesting, pass: p.passing,
-          x: ti === 0 ? slots[i][0] : -slots[i][0],
-          y: slots[i][1],
+          attack: mir(A[i]), defend: mir(D[i]),
         })),
       };
     });
-    drawEditor();
+    drawAll();
     drawRosters();
   }
 
-  function drawEditor() {
-    drawArena(edCtx, ed, edF);
-    editTeams.forEach((team, ti) => {
-      team.players.forEach(p => {
-        const px = edF.sx(p.x), py = edF.sy(p.y);
-        edCtx.fillStyle = teamColor(ti);
-        edCtx.beginPath(); edCtx.arc(px, py, 8, 0, Math.PI*2); edCtx.fill();
-        edCtx.fillStyle = '#eee'; edCtx.font = '11px system-ui'; edCtx.textAlign = 'center';
-        edCtx.fillText(p.name, px, py - 12);
-        edCtx.fillStyle = '#888'; edCtx.font = '9px system-ui';
-        edCtx.fillText(roleAbbr(p.role), px, py + 18);
-      });
+  function drawBoard(b) {
+    drawArena(b.ctx, b.canvas, b.f);
+    editTeams[b.team].players.forEach(p => {
+      const pos = p[phase];
+      const px = b.f.sx(pos.x), py = b.f.sy(pos.y);
+      b.ctx.fillStyle = teamColor(b.team);
+      b.ctx.beginPath(); b.ctx.arc(px, py, 7, 0, Math.PI*2); b.ctx.fill();
+      b.ctx.fillStyle = '#eee'; b.ctx.font = '10px system-ui'; b.ctx.textAlign = 'center';
+      b.ctx.fillText(p.name, px, py - 10);
+      b.ctx.fillStyle = '#888'; b.ctx.font = '8px system-ui';
+      b.ctx.fillText(roleAbbr(p.role), px, py + 15);
+    });
+  }
+  function drawAll() { boards.forEach(drawBoard); }
+
+  function drawRosters() {
+    editTeams.forEach((team, t) => {
+      const rows = team.players.map(p =>
+        `<tr><td><span class="dot" style="background:${teamColor(t)}"></span></td>` +
+        `<td>${p.name}</td><td class="hint">${roleAbbr(p.role)}</td>` +
+        `<td class="hint">F${p.fin} S${p.strip} C${p.cont} P${p.pass}</td></tr>`).join('');
+      document.getElementById('roster' + t).innerHTML = `<table>${rows}</table>`;
     });
   }
 
-  function drawRosters() {
-    document.getElementById('rosters').innerHTML = editTeams.map((team, ti) => {
-      const rows = team.players.map(p =>
-        `<tr><td><span class="dot" style="background:${teamColor(ti)}"></span></td>` +
-        `<td>${p.name}</td><td class="hint">${roleAbbr(p.role)}</td>` +
-        `<td class="hint">F${p.fin} S${p.strip} C${p.cont} P${p.pass}</td></tr>`).join('');
-      return `<div><div class="t${ti}">${team.name}</div><table>${rows}</table></div>`;
-    }).join('');
+  // ---- tabs ------------------------------------------------------------------
+  function setPhase(p) {
+    phase = p;
+    document.getElementById('tab-attack').classList.toggle('active', p === 'attack');
+    document.getElementById('tab-defend').classList.toggle('active', p === 'defend');
+    document.getElementById('phase-name').textContent = p === 'attack' ? 'attacking' : 'defending';
+    drawAll();
   }
+  document.getElementById('tab-attack').onclick = () => setPhase('attack');
+  document.getElementById('tab-defend').onclick = () => setPhase('defend');
 
-  // ---- dragging --------------------------------------------------------------
-  let drag = null; // { ti, pi }
-  function pickDot(mx, my) {
-    for (let ti = 0; ti < editTeams.length; ti++) {
-      const ps = editTeams[ti].players;
-      for (let pi = 0; pi < ps.length; pi++) {
-        const dx = edF.sx(ps[pi].x) - mx, dy = edF.sy(ps[pi].y) - my;
-        if (dx*dx + dy*dy <= 13*13) return { ti, pi };
-      }
-    }
-    return null;
-  }
-  function mousePos(e) {
-    const r = ed.getBoundingClientRect();
+  // ---- dragging (per board) --------------------------------------------------
+  let drag = null; // { board, pi }
+  function mousePos(canvas, e) {
+    const r = canvas.getBoundingClientRect();
     return [e.clientX - r.left, e.clientY - r.top];
   }
-  ed.addEventListener('pointerdown', e => {
-    const [mx, my] = mousePos(e);
-    drag = pickDot(mx, my);
-    if (drag) ed.setPointerCapture(e.pointerId);
+  boards.forEach(b => {
+    b.canvas.addEventListener('pointerdown', e => {
+      const [mx, my] = mousePos(b.canvas, e);
+      const ps = editTeams[b.team].players;
+      for (let pi = 0; pi < ps.length; pi++) {
+        const pos = ps[pi][phase];
+        const dx = b.f.sx(pos.x) - mx, dy = b.f.sy(pos.y) - my;
+        if (dx*dx + dy*dy <= 12*12) { drag = { board: b, pi }; b.canvas.setPointerCapture(e.pointerId); break; }
+      }
+    });
+    b.canvas.addEventListener('pointermove', e => {
+      if (!drag || drag.board !== b) return;
+      const [mx, my] = mousePos(b.canvas, e);
+      const pos = editTeams[b.team].players[drag.pi][phase];
+      pos.x = Math.max(-ARENA.half_x, Math.min(ARENA.half_x, Math.round(b.f.fx(mx))));
+      pos.y = Math.max(-ARENA.half_y, Math.min(ARENA.half_y, Math.round(b.f.fy(my))));
+      drawBoard(b);
+    });
+    b.canvas.addEventListener('pointerup', () => { drag = null; });
   });
-  ed.addEventListener('pointermove', e => {
-    if (!drag) return;
-    const [mx, my] = mousePos(e);
-    const p = editTeams[drag.ti].players[drag.pi];
-    p.x = Math.max(-ARENA.half_x, Math.min(ARENA.half_x, Math.round(edF.fx(mx))));
-    p.y = Math.max(-ARENA.half_y, Math.min(ARENA.half_y, Math.round(edF.fy(my))));
-    drawEditor();
-  });
-  ed.addEventListener('pointerup', () => { drag = null; });
 
   // ---- run -------------------------------------------------------------------
   function buildSetup() {
-    return {
-      formations: {
-        ed0: { slots: editTeams[0].players.map(p => [Math.round(p.x), Math.round(p.y)]) },
-        // Team 1 is mirrored by the sim, so store its anchors mirrored back.
-        ed1: { slots: editTeams[1].players.map(p => [Math.round(-p.x), Math.round(p.y)]) },
-      },
-      teams: editTeams.map((team, ti) => ({
+    const formations = {};
+    const teams = editTeams.map((team, t) => {
+      const an = `t${t}_attack`, dn = `t${t}_defend`;
+      // Team 1 is mirrored by the sim, so store its anchors mirrored back.
+      const back = pos => [Math.round(t === 0 ? pos.x : -pos.x), Math.round(pos.y)];
+      formations[an] = { slots: team.players.map(p => back(p.attack)) };
+      formations[dn] = { slots: team.players.map(p => back(p.defend)) };
+      return {
         name: team.name,
-        formation: ti === 0 ? 'ed0' : 'ed1',
+        attack_formation: an,
+        defend_formation: dn,
         players: team.players.map(p => ({
           name: p.name, role: p.role,
           finishing: p.fin, stripping: p.strip, contesting: p.cont, passing: p.pass,
         })),
-      })),
-    };
+      };
+    });
+    return { formations, teams };
   }
 
   const statusEl = document.getElementById('status');
@@ -218,7 +255,6 @@
     idx = 0; setPlaying(true); last = performance.now();
     vSection.scrollIntoView({ behavior: 'smooth' });
   }
-
   function setPlaying(p) { playing = p; playBtn.textContent = playing ? '⏸ Pause' : '▶ Play'; }
 
   function drawViewer(fr) {

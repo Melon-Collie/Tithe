@@ -5,12 +5,13 @@
 //! [`MatchSetup`] carries the **two coach inputs** plus the personnel they act
 //! on (§7 — teams differ only by personnel):
 //!
-//! - a **library of named formations** (positioning templates) — pick one per
-//!   team, so two teams can field different shapes;
+//! - a **library of named formations** (positioning templates); each team picks
+//!   two — an `attack_formation` (in-possession) and a `defend_formation`
+//!   (out-of-possession), so its shape morphs by phase (§1);
 //! - per team, a **roster** of players, each with a [`Role`] (the casting) and
 //!   the four attributes;
 //! - the **assignment** is positional: the *n*-th player fills the *n*-th slot
-//!   of the chosen formation.
+//!   of *both* of that team's shapes.
 //!
 //! It comes from a file today (a consumer parses TOML/JSON into this) and from
 //! the game's UI later — the sim doesn't care which. **No floats and no Fx live
@@ -49,12 +50,17 @@ pub struct FormationSpec {
     pub slots: Vec<[i32; 2]>,
 }
 
-/// One team: a display name, the formation it fields (by key into
-/// [`MatchSetup::formations`]), and its players in slot order.
+/// One team: a display name, the two **phase formations** it fields (each by key
+/// into [`MatchSetup::formations`]), and its players in slot order. Player *i*
+/// fills slot *i* of **both** shapes, so the two formations must have the same
+/// slot count as the roster.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeamSetup {
     pub name: String,
-    pub formation: String,
+    /// Shape used while this team holds the soul (in-possession).
+    pub attack_formation: String,
+    /// Shape used while it doesn't (enemy-held or loose; out-of-possession).
+    pub defend_formation: String,
     pub players: Vec<PlayerSetup>,
 }
 
@@ -153,33 +159,25 @@ impl std::fmt::Display for SetupError {
 impl std::error::Error for SetupError {}
 
 /// Turn a validated [`MatchSetup`] into the starting agents (team 0 first, ids
-/// sequential). Team 1's formation is mirrored across x. Errors point at the
-/// authoring mistake (see [`SetupError`]); no RNG is consumed — attributes are
-/// authored, so a match built from a setup is reproducible from the seed alone.
+/// sequential). Each player gets two phase anchors from the team's two
+/// formations; both are mirrored across x for team 1. Agents start on the
+/// **defending** anchor (the faceoff soul is loose → out-of-possession). Errors
+/// point at the authoring mistake (see [`SetupError`]); no RNG is consumed —
+/// attributes are authored, so a match is reproducible from the seed alone.
 pub fn build_agents(setup: &MatchSetup) -> Result<Vec<Agent>, SetupError> {
     if setup.teams.len() != 2 {
         return Err(SetupError::WrongTeamCount(setup.teams.len()));
     }
     let mut agents = Vec::new();
     for (team_idx, team) in setup.teams.iter().enumerate() {
-        let spec =
-            setup
-                .formations
-                .get(&team.formation)
-                .ok_or_else(|| SetupError::FormationNotFound {
-                    team: team.name.clone(),
-                    formation: team.formation.clone(),
-                })?;
-        if team.players.len() != spec.slots.len() {
-            return Err(SetupError::PlayerCountMismatch {
-                team: team.name.clone(),
-                formation: team.formation.clone(),
-                players: team.players.len(),
-                slots: spec.slots.len(),
-            });
-        }
-        for (slot, player) in spec.slots.iter().zip(&team.players) {
-            let anchor = anchor_for(team_idx, slot);
+        let attack = lookup_formation(setup, team, &team.attack_formation)?;
+        let defend = lookup_formation(setup, team, &team.defend_formation)?;
+        check_slot_count(team, &team.attack_formation, attack)?;
+        check_slot_count(team, &team.defend_formation, defend)?;
+
+        for (i, player) in team.players.iter().enumerate() {
+            let attack_anchor = anchor_for(team_idx, &attack.slots[i]);
+            let defend_anchor = anchor_for(team_idx, &defend.slots[i]);
             let attributes = player.to_attributes()?;
             let id = agents.len() as u32;
             agents.push(Agent {
@@ -187,9 +185,12 @@ pub fn build_agents(setup: &MatchSetup) -> Result<Vec<Agent>, SetupError> {
                 name: player.name.clone(),
                 team: team_idx as u8,
                 role: player.role,
-                pos: anchor,
-                target: anchor,
-                anchor,
+                // Faceoff soul is loose → out-of-possession → defending shape.
+                pos: defend_anchor,
+                target: defend_anchor,
+                anchor: defend_anchor,
+                attack_anchor,
+                defend_anchor,
                 stagger: 0,
                 stamina: Fx::from_num(1),
                 attributes,
@@ -197,6 +198,34 @@ pub fn build_agents(setup: &MatchSetup) -> Result<Vec<Agent>, SetupError> {
         }
     }
     Ok(agents)
+}
+
+/// Look up one of a team's formations by name, or report it missing.
+fn lookup_formation<'a>(
+    setup: &'a MatchSetup,
+    team: &TeamSetup,
+    name: &str,
+) -> Result<&'a FormationSpec, SetupError> {
+    setup
+        .formations
+        .get(name)
+        .ok_or_else(|| SetupError::FormationNotFound {
+            team: team.name.clone(),
+            formation: name.to_string(),
+        })
+}
+
+/// Ensure a formation's slot count matches the roster size.
+fn check_slot_count(team: &TeamSetup, name: &str, spec: &FormationSpec) -> Result<(), SetupError> {
+    if team.players.len() != spec.slots.len() {
+        return Err(SetupError::PlayerCountMismatch {
+            team: team.name.clone(),
+            formation: name.to_string(),
+            players: team.players.len(),
+            slots: spec.slots.len(),
+        });
+    }
+    Ok(())
 }
 
 /// A slot's anchor in absolute field coordinates: team 0 as authored, team 1
@@ -212,23 +241,43 @@ fn anchor_for(team_idx: usize, slot: &[i32; 2]) -> Vec2 {
 }
 
 impl MatchSetup {
-    /// A ready-to-edit example matchup: the default seven-slot "spine" shape,
-    /// fielded by two distinct rosters. This is what `tithe init` writes out and
-    /// what the setup tests build against — a concrete, authored stand-in for the
-    /// game's roster screen.
+    /// A ready-to-edit example matchup: two **phase shapes** (a high attacking
+    /// push and a deep defending block, slot-aligned to the roles) fielded by
+    /// two rosters. Authored in the team-0 frame: -x is each team's own scoring
+    /// goal (where it offers), +x the goal it defends. This is what `tithe init`
+    /// writes out and what the setup tests build against — a concrete stand-in
+    /// for the game's tactics + roster screens.
     pub fn default_match() -> Self {
         let mut formations = BTreeMap::new();
+        // In-possession: slide toward -x (own goal) to offer — finisher parked
+        // at the scoring spot, pressers up as support, anchor stepped up.
         formations.insert(
-            "spine".to_string(),
+            "high-push".to_string(),
             FormationSpec {
                 slots: vec![
-                    [-30, 0],  // deep safety (own goal)
-                    [-5, -15], // midfield
-                    [-5, 15],
-                    [10, 0], // spine — contests the center soul
-                    [28, -16],
-                    [28, 0], // forward press (the opponent's goal)
-                    [28, 16],
+                    [20, 0],    // 0 anchor (deepest safety, steps up)
+                    [-10, -14], // 1 rover
+                    [-8, 14],   // 2 playmaker (outlet)
+                    [-10, 0],   // 3 rover
+                    [8, -16],   // 4 presser (wide support)
+                    [-38, 0],   // 5 finisher (at the offering spot)
+                    [8, 16],    // 6 presser (wide support)
+                ],
+            },
+        );
+        // Out-of-possession: drop toward +x (the defended goal) — anchor as the
+        // last line, pressers forward to harry, finisher stays high to counter.
+        formations.insert(
+            "low-block".to_string(),
+            FormationSpec {
+                slots: vec![
+                    [38, 0],   // 0 anchor (last line at the defended goal)
+                    [18, -14], // 1 rover
+                    [10, 14],  // 2 playmaker
+                    [18, 0],   // 3 rover
+                    [30, -16], // 4 presser (harries the buildup)
+                    [-5, 0],   // 5 finisher (stays high, ready to counter)
+                    [30, 16],  // 6 presser
                 ],
             },
         );
@@ -265,11 +314,13 @@ impl MatchSetup {
 }
 
 /// Build an example team from compact `(name, role, [fin, strip, cont, pass])`
-/// tuples — keeps [`MatchSetup::default_match`] readable.
+/// tuples — keeps [`MatchSetup::default_match`] readable. Both teams field the
+/// shared `high-push` / `low-block` phase shapes.
 fn example_team(name: &str, players: &[(&str, Role, [u8; 4])]) -> TeamSetup {
     TeamSetup {
         name: name.to_string(),
-        formation: "spine".to_string(),
+        attack_formation: "high-push".to_string(),
+        defend_formation: "low-block".to_string(),
         players: players
             .iter()
             .map(
@@ -313,17 +364,28 @@ mod tests {
     }
 
     #[test]
-    fn team_one_formation_is_mirrored_across_x() {
+    fn each_player_gets_both_phase_anchors_team_one_mirrored() {
         let agents = build_agents(&MatchSetup::default_match()).expect("valid setup");
-        // Slot 0 is the deep safety at x=-30; team 1's mirrors to +30.
-        assert_eq!(
-            agents[0].anchor,
-            Vec2::new(Fx::from_num(-30), Fx::from_num(0))
-        );
-        assert_eq!(
-            agents[7].anchor,
-            Vec2::new(Fx::from_num(30), Fx::from_num(0))
-        );
+        let v = |x: i32, y: i32| Vec2::new(Fx::from_num(x), Fx::from_num(y));
+        // Slot 0 (anchor): attack high-push [20,0], defend low-block [38,0].
+        assert_eq!(agents[0].attack_anchor, v(20, 0));
+        assert_eq!(agents[0].defend_anchor, v(38, 0));
+        // Agents start on the defending anchor (faceoff soul is loose).
+        assert_eq!(agents[0].anchor, v(38, 0));
+        // Team 1's slot 0 mirrors both phases across x.
+        assert_eq!(agents[7].attack_anchor, v(-20, 0));
+        assert_eq!(agents[7].defend_anchor, v(-38, 0));
+        assert_eq!(agents[7].anchor, v(-38, 0));
+    }
+
+    #[test]
+    fn apply_phase_switches_between_the_two_shapes() {
+        let mut agents = build_agents(&MatchSetup::default_match()).expect("valid setup");
+        let a = &mut agents[0];
+        a.apply_phase(true);
+        assert_eq!(a.anchor, a.attack_anchor);
+        a.apply_phase(false);
+        assert_eq!(a.anchor, a.defend_anchor);
     }
 
     #[test]
@@ -341,7 +403,7 @@ mod tests {
     #[test]
     fn unknown_formation_is_rejected() {
         let mut setup = MatchSetup::default_match();
-        setup.teams[1].formation = "nonexistent".to_string();
+        setup.teams[1].defend_formation = "nonexistent".to_string();
         assert!(matches!(
             build_agents(&setup),
             Err(SetupError::FormationNotFound { .. })

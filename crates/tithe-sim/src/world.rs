@@ -260,9 +260,15 @@ pub enum Role {
 }
 
 /// A single agent: identity (id + display `name`), team, its coach-assigned
-/// `role`, where it is, where it's headed, its home anchor, how many ticks it
-/// remains staggered (0 = active), its stamina (1 = fresh, draining over a
-/// soul), and its attributes.
+/// `role`, where it is, where it's headed, its **phase-conditioned** home
+/// anchors, how many ticks it remains staggered (0 = active), its stamina
+/// (1 = fresh, draining over a soul), and its attributes.
+///
+/// Two coach formations give each player two homes: `attack_anchor` (used while
+/// its team holds the soul) and `defend_anchor` (used otherwise — enemy-held or
+/// loose). `anchor` is whichever is *active* this decision window; the sim
+/// reselects it at each decision boundary, so the shape morphs between phases on
+/// the slow clock, never mid-motion (§1, §2).
 #[derive(Debug, Clone)]
 pub struct Agent {
     pub id: u32,
@@ -272,9 +278,24 @@ pub struct Agent {
     pub pos: Vec2,
     pub target: Vec2,
     pub anchor: Vec2,
+    pub attack_anchor: Vec2,
+    pub defend_anchor: Vec2,
     pub stagger: u32,
     pub stamina: Fx,
     pub attributes: Attributes,
+}
+
+impl Agent {
+    /// Select the home anchor for this decision window: the attacking shape when
+    /// `in_possession` (my team holds the soul), the defending shape otherwise.
+    /// Called at each decision boundary so the shape transitions cleanly.
+    pub fn apply_phase(&mut self, in_possession: bool) {
+        self.anchor = if in_possession {
+            self.attack_anchor
+        } else {
+            self.defend_anchor
+        };
+    }
 }
 
 impl Agent {
@@ -361,6 +382,10 @@ fn push_agent(agents: &mut Vec<Agent>, team: u8, anchor: Vec2, rng: &mut Rng) {
         pos: anchor,
         target: anchor,
         anchor,
+        // The default teams use one formation, so both phase homes coincide —
+        // play is identical to the pre-phase behavior.
+        attack_anchor: anchor,
+        defend_anchor: anchor,
         stagger: 0,
         stamina: Fx::from_num(1),
         attributes: Attributes::random(rng),
