@@ -173,21 +173,31 @@ fn passes_happen() {
 
 #[test]
 fn passes_get_intercepted() {
-    let mut sim = Simulation::new(1);
+    // Interceptions are rare (~1% of passes, well under one per match), so a
+    // single seed is a coin-flip. Scan a sample of matches and assert the
+    // *mechanic* fires in normal play — not that any particular match shows it.
+    // Breaks on the first interception (usually within a few matches); the
+    // per-match tick cap keeps a non-terminating grind seed from hanging.
     let mut intercepted = false;
-    for _ in 0..20_000 {
-        if sim
-            .tick()
-            .iter()
-            .any(|e| matches!(e, Event::PassIntercepted { .. }))
-        {
-            intercepted = true;
-            break;
+    'matches: for seed in 1..=60u64 {
+        let mut sim = Simulation::new(seed);
+        for _ in 0..50_000 {
+            if sim.winner().is_some() {
+                break;
+            }
+            if sim
+                .tick()
+                .iter()
+                .any(|e| matches!(e, Event::PassIntercepted { .. }))
+            {
+                intercepted = true;
+                break 'matches;
+            }
         }
     }
     assert!(
         intercepted,
-        "expected a pass to be intercepted within 20000 ticks"
+        "expected at least one interception across 60 matches"
     );
 }
 
