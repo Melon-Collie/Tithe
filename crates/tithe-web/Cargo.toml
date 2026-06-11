@@ -1,0 +1,27 @@
+[package]
+name = "tithe-web"
+description = "A local dev front end for Tithe: edit both teams' formations in the browser, run the native sim, and watch the result. A consumer of the event stream — never part of the sim."
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "tithe-web"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+# A consumer, not the sim core — floats and serialization live here, never in
+# tithe-sim. The browser POSTs a MatchSetup; the native sim runs and the frame
+# stream comes back as JSON.
+tithe-sim = { path = "../tithe-sim" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Minimal local HTTP server. axum/tokio are the de-facto standard async Rust web
+# stack; this server is a swappable transport (the design's "native/server"
+# target) — the browser UI moves to WASM/Tauri later untouched.
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }

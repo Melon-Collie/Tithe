@@ -1,0 +1,285 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Tithe — tactics board</title>
+  <style>
+    :root { --t0: #e8643c; --t1: #4c9be8; --soul: #ffd84a; }
+    body { margin: 0; background: #111; color: #ddd;
+           font: 14px system-ui, sans-serif;
+           display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px; }
+    h1 { font-size: 18px; margin: 0; font-weight: 700; letter-spacing: 0.5px; }
+    .row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; justify-content: center; }
+    canvas { background: #1b1b1b; border: 1px solid #333; touch-action: none; }
+    button, input, select { font: inherit; }
+    button { background: #2a2a2a; color: #ddd; border: 1px solid #444; padding: 6px 12px; border-radius: 5px; cursor: pointer; }
+    button:hover { background: #353535; }
+    button.primary { background: var(--soul); color: #222; border-color: var(--soul); font-weight: 700; }
+    .t0 { color: var(--t0); font-weight: 600; }
+    .t1 { color: var(--t1); font-weight: 600; }
+    #status { min-height: 18px; color: #9aa; }
+    #rosters { display: flex; gap: 28px; font-size: 12px; }
+    #rosters table { border-collapse: collapse; }
+    #rosters td { padding: 1px 6px; }
+    .hint { color: #777; font-size: 12px; }
+    #viewer-section { display: none; flex-direction: column; align-items: center; gap: 8px; margin-top: 6px; }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <h1>TITHE — tactics board</h1>
+  <div class="row">
+    <label>seed <input id="seed" type="number" value="3" style="width: 70px" /></label>
+    <button id="run" class="primary">▶ Run match</button>
+    <button id="reset">Reset formation</button>
+    <span id="status"></span>
+  </div>
+  <p class="hint">Drag any player to reposition. <span class="t0">Embers</span> attack the left goal, <span class="t1">Wardens</span> the right.</p>
+  <canvas id="editor" width="920" height="540"></canvas>
+  <div id="rosters"></div>
+
+  <div id="viewer-section">
+    <div class="row">
+      <button id="play">⏸ Pause</button>
+      <label>speed <input id="speed" type="range" min="1" max="16" value="4" /></label>
+      <span id="score"></span>
+      <span id="tick"></span>
+      <span id="winner" style="font-weight:700"></span>
+    </div>
+    <input id="scrub" type="range" min="0" value="0" style="width: 920px" />
+    <canvas id="viewer" width="920" height="600"></canvas>
+  </div>
+
+  <script>
+  // ---- arena (SimConfig defaults; the editor needs them before a run) --------
+  const ARENA = { half_x: 50, half_y: 30, goal_x: 45 };
+  const teamColor = t => (t === 0 ? '#e8643c' : '#4c9be8');
+  const roleAbbr = r => ({ finisher:'FIN', playmaker:'PLY', presser:'PRS', anchor:'ANC', rover:'ROV' }[r] || r);
+
+  // A field<->screen mapping for a canvas (shared by editor and viewer).
+  function field(canvas) {
+    const m = 40;
+    const scale = Math.min((canvas.width - 2*m) / (ARENA.half_x*2), (canvas.height - 2*m) / (ARENA.half_y*2));
+    return {
+      scale,
+      sx: x => canvas.width/2 + x*scale,
+      sy: y => canvas.height/2 - y*scale,
+      fx: px => (px - canvas.width/2) / scale,
+      fy: py => (canvas.height/2 - py) / scale,
+    };
+  }
+
+  function drawArena(ctx, canvas, f) {
+    ctx.fillStyle = '#1b1b1b'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#444'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(canvas.width/2, canvas.height/2, ARENA.half_x*f.scale, ARENA.half_y*f.scale, 0, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(canvas.width/2, f.sy(ARENA.half_y)); ctx.lineTo(canvas.width/2, f.sy(-ARENA.half_y)); ctx.stroke();
+    for (const [gx, team] of [[-ARENA.goal_x, 0], [ARENA.goal_x, 1]]) {
+      ctx.strokeStyle = teamColor(team); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(f.sx(gx), f.sy(0), 12, 0, Math.PI*2); ctx.stroke();
+    }
+  }
+
+  // ---- editor state ----------------------------------------------------------
+  // editTeams[t] = { name, players:[{ name, role, fin, strip, cont, pass, x, y }] }
+  // Positions x,y are absolute field coords (what's drawn). Team 1 is stored in
+  // the sim mirrored across x, so we mirror on load and again on export.
+  let editTeams = [];
+  const ed = document.getElementById('editor');
+  const edCtx = ed.getContext('2d');
+  const edF = field(ed);
+
+  async function loadDefault() {
+    const setup = await (await fetch('/api/default-setup')).json();
+    editTeams = setup.teams.map((team, ti) => {
+      const slots = setup.formations[team.formation].slots;
+      return {
+        name: team.name,
+        players: team.players.map((p, i) => ({
+          name: p.name, role: p.role,
+          fin: p.finishing, strip: p.stripping, cont: p.contesting, pass: p.passing,
+          x: ti === 0 ? slots[i][0] : -slots[i][0],
+          y: slots[i][1],
+        })),
+      };
+    });
+    drawEditor();
+    drawRosters();
+  }
+
+  function drawEditor() {
+    drawArena(edCtx, ed, edF);
+    editTeams.forEach((team, ti) => {
+      team.players.forEach(p => {
+        const px = edF.sx(p.x), py = edF.sy(p.y);
+        edCtx.fillStyle = teamColor(ti);
+        edCtx.beginPath(); edCtx.arc(px, py, 8, 0, Math.PI*2); edCtx.fill();
+        edCtx.fillStyle = '#eee'; edCtx.font = '11px system-ui'; edCtx.textAlign = 'center';
+        edCtx.fillText(p.name, px, py - 12);
+        edCtx.fillStyle = '#888'; edCtx.font = '9px system-ui';
+        edCtx.fillText(roleAbbr(p.role), px, py + 18);
+      });
+    });
+  }
+
+  function drawRosters() {
+    document.getElementById('rosters').innerHTML = editTeams.map((team, ti) => {
+      const rows = team.players.map(p =>
+        `<tr><td><span class="dot" style="background:${teamColor(ti)}"></span></td>` +
+        `<td>${p.name}</td><td class="hint">${roleAbbr(p.role)}</td>` +
+        `<td class="hint">F${p.fin} S${p.strip} C${p.cont} P${p.pass}</td></tr>`).join('');
+      return `<div><div class="t${ti}">${team.name}</div><table>${rows}</table></div>`;
+    }).join('');
+  }
+
+  // ---- dragging --------------------------------------------------------------
+  let drag = null; // { ti, pi }
+  function pickDot(mx, my) {
+    for (let ti = 0; ti < editTeams.length; ti++) {
+      const ps = editTeams[ti].players;
+      for (let pi = 0; pi < ps.length; pi++) {
+        const dx = edF.sx(ps[pi].x) - mx, dy = edF.sy(ps[pi].y) - my;
+        if (dx*dx + dy*dy <= 13*13) return { ti, pi };
+      }
+    }
+    return null;
+  }
+  function mousePos(e) {
+    const r = ed.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  }
+  ed.addEventListener('pointerdown', e => {
+    const [mx, my] = mousePos(e);
+    drag = pickDot(mx, my);
+    if (drag) ed.setPointerCapture(e.pointerId);
+  });
+  ed.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const [mx, my] = mousePos(e);
+    const p = editTeams[drag.ti].players[drag.pi];
+    p.x = Math.max(-ARENA.half_x, Math.min(ARENA.half_x, Math.round(edF.fx(mx))));
+    p.y = Math.max(-ARENA.half_y, Math.min(ARENA.half_y, Math.round(edF.fy(my))));
+    drawEditor();
+  });
+  ed.addEventListener('pointerup', () => { drag = null; });
+
+  // ---- run -------------------------------------------------------------------
+  function buildSetup() {
+    return {
+      formations: {
+        ed0: { slots: editTeams[0].players.map(p => [Math.round(p.x), Math.round(p.y)]) },
+        // Team 1 is mirrored by the sim, so store its anchors mirrored back.
+        ed1: { slots: editTeams[1].players.map(p => [Math.round(-p.x), Math.round(p.y)]) },
+      },
+      teams: editTeams.map((team, ti) => ({
+        name: team.name,
+        formation: ti === 0 ? 'ed0' : 'ed1',
+        players: team.players.map(p => ({
+          name: p.name, role: p.role,
+          finishing: p.fin, stripping: p.strip, contesting: p.cont, passing: p.pass,
+        })),
+      })),
+    };
+  }
+
+  const statusEl = document.getElementById('status');
+  document.getElementById('run').onclick = async () => {
+    statusEl.textContent = 'running…';
+    const body = { setup: buildSetup(), seed: Number(document.getElementById('seed').value), max_ticks: 200000 };
+    let res;
+    try {
+      res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    } catch (err) { statusEl.textContent = 'error: ' + err; return; }
+    if (!res.ok) { statusEl.textContent = 'setup error: ' + (await res.text()); return; }
+    const match = await res.json();
+    statusEl.textContent = `${match.frames.length} ticks · final ${match.frames.at(-1)?.score.join('–') ?? '0–0'}` +
+      (match.winner != null ? ` · winner ${editTeams[match.winner].name}` : ' · (hit tick cap)');
+    startViewer(match);
+  };
+  document.getElementById('reset').onclick = loadDefault;
+
+  // ---- viewer (playback) -----------------------------------------------------
+  const vSection = document.getElementById('viewer-section');
+  const vc = document.getElementById('viewer');
+  const vctx = vc.getContext('2d');
+  const vF = field(vc);
+  const speedEl = document.getElementById('speed');
+  const scrub = document.getElementById('scrub');
+  const playBtn = document.getElementById('play');
+  let MATCH = null, idx = 0, playing = false, acc = 0, last = 0;
+
+  function startViewer(match) {
+    MATCH = match;
+    vSection.style.display = 'flex';
+    scrub.max = match.frames.length - 1;
+    idx = 0; setPlaying(true); last = performance.now();
+    vSection.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function setPlaying(p) { playing = p; playBtn.textContent = playing ? '⏸ Pause' : '▶ Play'; }
+
+  function drawViewer(fr) {
+    drawArena(vctx, vc, vF);
+    const meta = MATCH.agents, frames = MATCH.frames;
+    // Soul trail: a fading tail of recent positions.
+    vctx.strokeStyle = 'rgba(255,216,74,0.35)'; vctx.lineWidth = 2; vctx.beginPath();
+    for (let k = Math.max(0, idx - 18); k <= idx; k++) {
+      const s = frames[k].soul; const X = vF.sx(s[0]), Y = vF.sy(s[1]);
+      if (k === Math.max(0, idx - 18)) vctx.moveTo(X, Y); else vctx.lineTo(X, Y);
+    }
+    vctx.stroke();
+    for (let i = 0; i < fr.agents.length; i++) {
+      const a = fr.agents[i], m = meta[i];
+      const X = vF.sx(a.x), Y = vF.sy(a.y);
+      vctx.globalAlpha = a.stagger ? 0.25 : 0.45 + 0.55 * (a.stamina ?? 1);
+      vctx.fillStyle = teamColor(m.team);
+      vctx.beginPath(); vctx.arc(X, Y, 7, 0, Math.PI*2); vctx.fill();
+      if (fr.carrier === m.id) {
+        vctx.globalAlpha = 1; vctx.strokeStyle = '#ffd84a'; vctx.lineWidth = 2.5;
+        vctx.beginPath(); vctx.arc(X, Y, 11, 0, Math.PI*2); vctx.stroke();
+      }
+      vctx.globalAlpha = 1; vctx.fillStyle = '#cfcfcf'; vctx.font = '10px system-ui'; vctx.textAlign = 'center';
+      vctx.fillText(m.name, X, Y - 11);
+    }
+    vctx.globalAlpha = 1;
+    vctx.fillStyle = '#ffd84a'; vctx.shadowColor = '#ffb000'; vctx.shadowBlur = 12;
+    vctx.beginPath(); vctx.arc(vF.sx(fr.soul[0]), vF.sy(fr.soul[1]), 5, 0, Math.PI*2); vctx.fill();
+    vctx.shadowBlur = 0;
+    if (fr.scored !== undefined) {
+      vctx.fillStyle = teamColor(fr.scored); vctx.globalAlpha = 0.15;
+      vctx.fillRect(0, 0, vc.width, vc.height); vctx.globalAlpha = 1;
+    }
+    document.getElementById('score').innerHTML =
+      `<span class="t0">${fr.score[0]}</span> – <span class="t1">${fr.score[1]}</span>`;
+    document.getElementById('tick').textContent = `tick ${fr.tick}`;
+    const w = document.getElementById('winner');
+    w.innerHTML = (idx === frames.length - 1 && MATCH.winner != null)
+      ? `WINNER: <span class="t${MATCH.winner}">${editTeams[MATCH.winner].name}</span>` : '';
+    scrub.value = idx;
+  }
+
+  function loop(now) {
+    if (MATCH) {
+      const dt = now - last; last = now;
+      if (playing) {
+        acc += (dt / 1000) * 60 * (Number(speedEl.value) / 4);
+        while (acc >= 1) {
+          idx = Math.min(idx + 1, MATCH.frames.length - 1); acc -= 1;
+          if (idx >= MATCH.frames.length - 1) setPlaying(false);
+        }
+      }
+      drawViewer(MATCH.frames[idx]);
+    }
+    requestAnimationFrame(loop);
+  }
+  playBtn.onclick = () => { if (idx >= MATCH.frames.length - 1) idx = 0; setPlaying(!playing); };
+  scrub.oninput = () => { idx = Number(scrub.value); setPlaying(false); };
+
+  loadDefault();
+  requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
