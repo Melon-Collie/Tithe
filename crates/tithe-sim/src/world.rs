@@ -51,14 +51,20 @@ pub struct SimConfig {
     pub strip_success_max_pct: u32,
     /// Ticks a whiffed defender is staggered (beaten, can't act).
     pub stagger_ticks: u32,
-    /// How close a carrier must get to its own goal to begin an offering.
-    pub offering_radius: Fx,
     /// Ticks an offering takes to resolve (the wind-up defenders can arrive in).
     pub offering_windup: u32,
-    /// Base offering success (before Finishing and contest), as a fraction.
+    /// Base offering success at point-blank (before Accuracy and contest).
     pub offering_base: Fx,
-    /// Extra success from the carrier's Finishing (added to base, ×finishing).
-    pub offering_finish_gain: Fx,
+    /// Extra success from the carrier's Accuracy (added to base, ×accuracy).
+    pub offering_accuracy_gain: Fx,
+    /// A shot's effective range at Range 0 — the distance at which success
+    /// reaches zero for a player with no ranged ability.
+    pub shot_base_range: Fx,
+    /// How much the carrier's Range attribute extends the effective shot range.
+    pub shot_range_gain: Fx,
+    /// The value of scoring (in value-field units) — how a shot's expected
+    /// payoff weighs against carrying or passing in the on-ball decision.
+    pub shot_value: Fx,
     /// How close an enemy must be to harry an offering.
     pub offering_contest_radius: Fx,
     /// Maximum total contest (cap on summed Contesting) — leaves a slim chance.
@@ -122,10 +128,13 @@ impl Default for SimConfig {
             carry_contest_radius: Fx::from_num(7),
             strip_success_max_pct: 70, // × Stripping 0.5 = the old flat 35%
             stagger_ticks: 15,
-            offering_radius: Fx::from_num(3),
             offering_windup: 8,
             offering_base: Fx::from_num(4) / Fx::from_num(10), // 0.4
-            offering_finish_gain: Fx::from_num(5) / Fx::from_num(10), // 0.5 → finishing 0.5 ⇒ 0.65 base
+            offering_accuracy_gain: Fx::from_num(5) / Fx::from_num(10), // 0.5 → accuracy 0.5 ⇒ 0.65 peak
+            // Range 0 ⇒ effective to ~5 units; Range 0.85 ⇒ ~26 (a perimeter threat).
+            shot_base_range: Fx::from_num(5),
+            shot_range_gain: Fx::from_num(25),
+            shot_value: Fx::from_num(3), // tuned against AI-vs-AI shot/score rates
             offering_contest_radius: Fx::from_num(7),
             offering_contest_max: Fx::from_num(9) / Fx::from_num(10), // 0.9
             rebound_distance: Fx::from_num(20),
@@ -189,12 +198,18 @@ impl Formation {
 }
 
 /// Per-player capabilities. A stat exists only because some sim step consumes
-/// it (§4): `finishing` → offering success; `stripping` → strip-the-carrier
-/// success; `contesting` → pass interception + offering contest (and the lane
-/// area a defender covers). All in `[0, 1]`.
+/// it (§4): shooting splits into `accuracy` (point-blank conversion quality) and
+/// `range` (how far that quality holds up — the perimeter threat); `stripping`
+/// → strip-the-carrier success; `contesting` → pass interception + offering
+/// contest (and the lane area a defender covers); `passing` → pass completion.
+/// All in `[0, 1]`.
 #[derive(Debug, Clone, Copy)]
 pub struct Attributes {
-    pub finishing: Fx,
+    /// Point-blank shot conversion quality (the high-Accuracy interior finisher).
+    pub accuracy: Fx,
+    /// How slowly shot success falls off with distance — a high-Range player
+    /// stays a threat from the perimeter.
+    pub range: Fx,
     pub stripping: Fx,
     pub contesting: Fx,
     /// Raises a passer's completion chance — better passers complete more, so
@@ -208,7 +223,8 @@ impl Attributes {
     pub fn uniform() -> Self {
         let mid = Fx::from_num(1) / Fx::from_num(2); // 0.5
         Self {
-            finishing: mid,
+            accuracy: mid,
+            range: mid,
             stripping: mid,
             contesting: mid,
             passing: mid,
@@ -221,7 +237,8 @@ impl Attributes {
     /// from the threaded [`Rng`].
     pub fn random(rng: &mut Rng) -> Self {
         Self {
-            finishing: draw_attribute(rng),
+            accuracy: draw_attribute(rng),
+            range: draw_attribute(rng),
             stripping: draw_attribute(rng),
             contesting: draw_attribute(rng),
             passing: draw_attribute(rng),

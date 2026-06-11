@@ -12,8 +12,8 @@
 //! Borrowed in spirit from the Mitts utility AI, but reshaped for our rules and
 //! kept **shallow** (a pointwise function, no lookahead/search — design laws
 //! §2/§10) and **fixed-point / trig-free** (distances and projections, never
-//! angles). Role re-weighting and the Finishing gate plug in here later; for now
-//! every agent reads the same base field.
+//! angles). Role re-weighting plugs in here later; for now every agent reads the
+//! same base field.
 
 use crate::fx::{Fx, Vec2, WideFx};
 use crate::world::SimConfig;

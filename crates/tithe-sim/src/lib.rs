@@ -202,9 +202,9 @@ impl Simulation {
         self.claim_loose_soul(&mut events);
         self.carry_soul();
 
-        // The offering: a carrier at its goal winds up, then resolves as a
-        // skill check. A score on the X-th soul ends the match; a miss spits the
-        // soul back into play.
+        // The offering: a carrier who chose to shoot winds up, then resolves as
+        // a skill check. A score on the X-th soul ends the match; a miss spits
+        // the soul back into play.
         if !self.update_offering(&mut events) {
             events.push(Event::SoulMoved { pos: self.soul.pos });
         }
@@ -420,13 +420,14 @@ impl Simulation {
         }
     }
 
-    /// The carrier weighs carrying vs passing on one shared value field
-    /// (expected value). Carrying = my offering value here, minus a turnover
-    /// cost (how pressured I am × what the opponent gains from this spot). A
-    /// pass = P(complete) × the receiver's value − P(lost) × what the opponent
-    /// gains at the interception point. The best option that beats carrying (by
-    /// a margin) launches the soul; the completion roll decides the outcome at
-    /// release. Better passers complete more, so they pass more.
+    /// The carrier weighs **carry vs pass vs shoot** on one shared value field
+    /// (expected value). Carrying = my value here minus a turnover cost. A pass
+    /// = P(complete) × receiver value − P(lost) × what the opponent gains at the
+    /// interception point. A shot = P(score from here) × the value of scoring −
+    /// P(miss) × what the rebound concedes. Shooting wins when it's the best
+    /// positive option (so a carrier drives in for a high-% look, or lets fly
+    /// from range when he can't get closer); otherwise a pass that beats carrying
+    /// by a margin launches the soul, else the carrier carries.
     fn resolve_on_ball(&mut self, events: &mut Vec<Event>) {
         let Possession::Held(carrier_id) = self.soul.possession else {
             return;
@@ -435,15 +436,15 @@ impl Simulation {
         let carrier_pos = self.agents[carrier_id as usize].pos;
         let my_goal = self.goals[team as usize];
         let enemy_goal = self.goals[1 - team as usize];
-        let passing = self.agents[carrier_id as usize].attributes.passing;
+        let attrs = self.agents[carrier_id as usize].attributes;
         let aversion = self.config.turnover_aversion;
+        let zero = Fx::from_num(0);
+        let one = Fx::from_num(1);
 
         let enemies: Vec<Vec2> = self.team_positions(1 - team);
         let allies: Vec<Vec2> = self.team_positions(team);
 
-        // Carrying: pick the best carry *route* — a waypoint toward goal whose
-        // path dodges pressure (so the carrier curves around a presser instead
-        // of strolling into the strip).
+        // Carrying: the best route toward goal that dodges pressure.
         let (carry_target, carry_ev) = self.best_carry_route(
             carrier_pos,
             my_goal,
@@ -452,9 +453,20 @@ impl Simulation {
             &allies,
             aversion,
         );
-        let mut best_ev = carry_ev + self.config.pass_value_margin;
 
-        let mut chosen: Option<(u32, Fx, Option<u32>)> = None; // receiver, completion, blocker
+        // Shooting from here: score chance falls off with distance (further for
+        // high-Range players), against what a missed shot's rebound concedes.
+        let distance = carrier_pos.distance_to(my_goal);
+        let shoot_contest = self.offering_contest(team, carrier_pos);
+        let shoot_prob =
+            self.shot_probability(distance, attrs.accuracy, attrs.range, shoot_contest);
+        let shoot_ev = shoot_prob * self.config.shot_value
+            - (one - shoot_prob)
+                * value::value_at(carrier_pos, enemy_goal, &allies, &self.config)
+                * aversion;
+
+        // Passing: the best receiver by EV.
+        let mut best_pass: Option<(u32, Fx, Option<u32>, Fx)> = None; // recv, completion, blocker, ev
         for agent in &self.agents {
             if agent.team != team || agent.id == carrier_id || !agent.is_active() {
                 continue;
@@ -464,24 +476,38 @@ impl Simulation {
             }
             let (lane, blocker) = self.pass_lane(carrier_pos, agent.pos, team);
             // Better passers thread tighter lanes (uniform 0.5 ⇒ lane unchanged).
-            let completion = (lane * (Fx::from_num(1) / Fx::from_num(2) + passing))
-                .clamp(Fx::from_num(0), Fx::from_num(1));
+            let completion =
+                (lane * (Fx::from_num(1) / Fx::from_num(2) + attrs.passing)).clamp(zero, one);
             if completion < self.config.pass_min_lane {
                 continue;
             }
             let benefit = value::value_at(agent.pos, my_goal, &enemies, &self.config) * completion;
             let loss_point = blocker.map_or(agent.pos, |b| self.agents[b as usize].pos);
-            let cost = (Fx::from_num(1) - completion)
+            let cost = (one - completion)
                 * value::value_at(loss_point, enemy_goal, &allies, &self.config)
                 * aversion;
             let ev = benefit - cost;
-            if ev > best_ev {
-                best_ev = ev;
-                chosen = Some((agent.id, completion, blocker));
+            if best_pass.is_none_or(|(_, _, _, e)| ev > e) {
+                best_pass = Some((agent.id, completion, blocker, ev));
             }
         }
+        let best_pass_ev = best_pass.map_or(Fx::from_num(-9999), |(_, _, _, e)| e);
 
-        if let Some((receiver, completion, blocker)) = chosen {
+        // Shoot if it's the best positive option…
+        if shoot_ev > zero && shoot_ev >= carry_ev && shoot_ev >= best_pass_ev {
+            self.offering = Some(OfferState {
+                carrier: carrier_id,
+                ticks_left: self.config.offering_windup,
+            });
+            events.push(Event::OfferingStarted {
+                carrier: carrier_id,
+            });
+            return;
+        }
+        // …else pass if a receiver beats carrying by the margin…
+        if best_pass_ev > carry_ev + self.config.pass_value_margin {
+            let (receiver, completion, blocker, _) =
+                best_pass.expect("best_pass_ev came from Some");
             let pct = (completion * Fx::from_num(100)).to_num::<u64>();
             let completed = self.rng.below(100) < pct;
             let intercepted = !completed && blocker.is_some();
@@ -496,10 +522,10 @@ impl Simulation {
                 to: receiver,
                 chance: pct as u8,
             });
-        } else {
-            // No worthwhile pass — carry the chosen route around the pressure.
-            self.agents[carrier_id as usize].target = carry_target;
+            return;
         }
+        // …else carry the chosen route around the pressure.
+        self.agents[carrier_id as usize].target = carry_target;
     }
 
     /// The best carry route: among a few waypoints toward the goal, the one with
@@ -620,9 +646,12 @@ impl Simulation {
         }
     }
 
-    /// Drive the offering: start one when a carrier reaches its goal, count the
-    /// wind-up down, and resolve it as a skill check. Returns `true` if a score
-    /// ended the match (so the caller skips the trailing `SoulMoved`).
+    /// Drive an in-progress offering: count the wind-up down and resolve it as a
+    /// skill check. The offering is *started* by the carrier's shoot decision in
+    /// [`resolve_on_ball`], not here. Returns `true` if a score ended the match
+    /// (so the caller skips the trailing `SoulMoved`).
+    ///
+    /// [`resolve_on_ball`]: Simulation::resolve_on_ball
     fn update_offering(&mut self, events: &mut Vec<Event>) -> bool {
         if let Some(state) = self.offering {
             if state.ticks_left > 1 {
@@ -634,34 +663,12 @@ impl Simulation {
             }
             return self.resolve_offering(state.carrier, events);
         }
-
-        // Not offering yet: begin one if a carrier has reached its own goal.
-        if let Possession::Held(id) = self.soul.possession {
-            let team = self.agents[id as usize].team;
-            let at_goal = self.agents[id as usize]
-                .pos
-                .distance_to(self.goals[team as usize])
-                <= self.config.offering_radius;
-            if at_goal {
-                self.offering = Some(OfferState {
-                    carrier: id,
-                    ticks_left: self.config.offering_windup,
-                });
-                events.push(Event::OfferingStarted { carrier: id });
-            }
-        }
         false
     }
 
-    /// Resolve a finished wind-up: success = (base + Finishing×gain) × (1 −
-    /// contest), where contest sums the Contesting of enemies who arrived within
-    /// range. A score may end the match; a miss spits the soul back into play.
-    fn resolve_offering(&mut self, carrier_id: u32, events: &mut Vec<Event>) -> bool {
-        self.offering = None;
-        let team = self.agents[carrier_id as usize].team;
-        let carrier_pos = self.agents[carrier_id as usize].pos;
-        let finishing = self.agents[carrier_id as usize].attributes.finishing;
-
+    /// Summed Contesting of enemies within harry range of a shot, capped — the
+    /// contest term that cuts a shot's success.
+    fn offering_contest(&self, team: u8, carrier_pos: Vec2) -> Fx {
         let mut contest = Fx::from_num(0);
         for agent in &self.agents {
             if agent.team != team
@@ -671,9 +678,37 @@ impl Simulation {
                 contest += agent.attributes.contesting;
             }
         }
-        let contest = contest.min(self.config.offering_contest_max);
-        let raw = self.config.offering_base + finishing * self.config.offering_finish_gain;
-        let prob = (raw * (Fx::from_num(1) - contest)).clamp(Fx::from_num(0), Fx::from_num(1));
+        contest.min(self.config.offering_contest_max)
+    }
+
+    /// Probability a shot from `distance` scores: peak quality (base +
+    /// Accuracy×gain) cut by a linear distance falloff whose reach grows with
+    /// Range, then by enemy `contest`. The old point-blank offering is just the
+    /// distance-0 case.
+    fn shot_probability(&self, distance: Fx, accuracy: Fx, range: Fx, contest: Fx) -> Fx {
+        let one = Fx::from_num(1);
+        let zero = Fx::from_num(0);
+        let effective_range = self.config.shot_base_range + range * self.config.shot_range_gain;
+        let dist_factor = (one - distance / effective_range).clamp(zero, one);
+        let peak = self.config.offering_base + accuracy * self.config.offering_accuracy_gain;
+        (peak * dist_factor * (one - contest)).clamp(zero, one)
+    }
+
+    /// Resolve a finished wind-up: a shot whose success follows
+    /// [`shot_probability`] from the carrier's distance to its goal, against the
+    /// Contesting of enemies who arrived in range. A score may end the match; a
+    /// miss spits the soul back into play.
+    ///
+    /// [`shot_probability`]: Simulation::shot_probability
+    fn resolve_offering(&mut self, carrier_id: u32, events: &mut Vec<Event>) -> bool {
+        self.offering = None;
+        let team = self.agents[carrier_id as usize].team;
+        let carrier_pos = self.agents[carrier_id as usize].pos;
+        let attrs = self.agents[carrier_id as usize].attributes;
+
+        let distance = carrier_pos.distance_to(self.goals[team as usize]);
+        let contest = self.offering_contest(team, carrier_pos);
+        let prob = self.shot_probability(distance, attrs.accuracy, attrs.range, contest);
         let success_pct = (prob * Fx::from_num(100)).to_num::<u64>();
         let scored = self.rng.below(100) < success_pct;
         events.push(Event::OfferingResolved {
@@ -737,5 +772,43 @@ impl Simulation {
             team: carrier.team,
             pos: carrier.pos,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A shot's success falls off with distance, and a high-Range shooter holds
+    /// his chance much further out than a low-Range one (the Sniper vs Perimeter
+    /// distinction).
+    #[test]
+    fn shot_probability_falls_off_with_distance_and_range_extends_it() {
+        let sim = Simulation::new(0);
+        let acc = Fx::from_num(7) / Fx::from_num(10); // 0.70
+        let lo = Fx::from_num(3) / Fx::from_num(10); // low Range
+        let hi = Fx::from_num(9) / Fx::from_num(10); // high Range
+        let no_contest = Fx::from_num(0);
+        let d = |n| Fx::from_num(n);
+
+        // Point-blank: distance doesn't bite yet, Range barely matters.
+        assert!(sim.shot_probability(d(0), acc, lo, no_contest) > Fx::from_num(0));
+        // Closer beats further for the same shooter.
+        assert!(
+            sim.shot_probability(d(4), acc, lo, no_contest)
+                > sim.shot_probability(d(12), acc, lo, no_contest)
+        );
+        // At a real distance, the high-Range shooter is still dangerous where the
+        // low-Range one has dropped to nothing.
+        assert_eq!(
+            sim.shot_probability(d(20), acc, lo, no_contest),
+            Fx::from_num(0)
+        );
+        assert!(sim.shot_probability(d(20), acc, hi, no_contest) > Fx::from_num(0));
+        // Contest cuts the chance.
+        assert!(
+            sim.shot_probability(d(2), acc, hi, Fx::from_num(6) / Fx::from_num(10))
+                < sim.shot_probability(d(2), acc, hi, no_contest)
+        );
     }
 }

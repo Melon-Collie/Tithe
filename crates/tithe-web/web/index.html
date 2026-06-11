@@ -128,7 +128,7 @@
         name: team.name,
         players: team.players.map((p, i) => ({
           name: p.name, role: p.role,
-          fin: p.finishing, strip: p.stripping, cont: p.contesting, pass: p.passing,
+          acc: p.accuracy, rng: p.range, strip: p.stripping, cont: p.contesting, pass: p.passing,
           attack: mir(A[i]), defend: mir(D[i]),
         })),
       };
@@ -157,7 +157,7 @@
       const rows = team.players.map(p =>
         `<tr><td><span class="dot" style="background:${teamColor(t)}"></span></td>` +
         `<td>${p.name}</td><td class="hint">${roleAbbr(p.role)}</td>` +
-        `<td class="hint">F${p.fin} S${p.strip} C${p.cont} P${p.pass}</td></tr>`).join('');
+        `<td class="hint">A${p.acc} R${p.rng} S${p.strip} C${p.cont} P${p.pass}</td></tr>`).join('');
       document.getElementById('roster' + t).innerHTML = `<table>${rows}</table>`;
     });
   }
@@ -215,7 +215,7 @@
         defend_formation: dn,
         players: team.players.map(p => ({
           name: p.name, role: p.role,
-          finishing: p.fin, stripping: p.strip, contesting: p.cont, passing: p.pass,
+          accuracy: p.acc, range: p.rng, stripping: p.strip, contesting: p.cont, passing: p.pass,
         })),
       };
     });

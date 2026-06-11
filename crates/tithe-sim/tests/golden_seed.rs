@@ -69,7 +69,7 @@ fn from_setup_is_reproducible_and_authored() {
     };
     // An authored match is a pure function of the seed (no RNG-rolled roster).
     assert_eq!(run(123), run(123));
-    // The roster is the authored one, not the default — Sear's finishing is 0.85.
+    // The roster is the authored one, not the default — Sear's accuracy is 0.85.
     let sim = Simulation::from_setup(&setup, 1).expect("valid setup");
     let sear = sim
         .agents()
@@ -77,7 +77,7 @@ fn from_setup_is_reproducible_and_authored() {
         .find(|a| a.name == "Sear")
         .expect("Sear");
     assert_eq!(
-        sear.attributes.finishing,
+        sear.attributes.accuracy,
         Fx::from_num(85) / Fx::from_num(100)
     );
 }
