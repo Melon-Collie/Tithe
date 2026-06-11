@@ -64,9 +64,13 @@ pub fn choose_intent(
         // I'm the carrier.
         Some(c) if c.id == agent.id => Intent::CarryToGoal,
         // An enemy carries it: only our nearest defender closes down; the rest
-        // hold their defensive shape rather than swarming the ball.
+        // hold their defensive shape rather than swarming the ball. How far the
+        // defender will break shape to engage scales with its role (a Presser
+        // hounds from distance, an Anchor only when the carrier is close).
         Some(c) if c.team != agent.team => {
-            if is_team_nearest && agent.pos.distance_to(c.pos) <= config.contest_range {
+            let range =
+                config.contest_range * config.defense_bias(agent.defend_role).contest_range_mult;
+            if is_team_nearest && agent.pos.distance_to(c.pos) <= range {
                 Intent::ContestCarrier
             } else {
                 Intent::HoldAnchor
@@ -133,8 +137,14 @@ pub fn off_ball_target(
     let enemy_goal = goals[1 - agent.team as usize];
 
     // The role's drift appetite tightens or loosens how far it shades off its
-    // anchor (Stay-at-home hugs his shape; Dangler roams).
-    let drift = config.drift_radius * config.on_ball_bias(agent.attack_role).drift_mult;
+    // anchor — the in-possession role when attacking (Stay-at-home hugs, Dangler
+    // roams), the out-of-possession role when defending (Anchor holds tight).
+    let drift_mult = if attacking {
+        config.on_ball_bias(agent.attack_role).drift_mult
+    } else {
+        config.defense_bias(agent.defend_role).drift_mult
+    };
+    let drift = config.drift_radius * drift_mult;
     let mut best = agent.anchor;
     let mut best_score = Fx::from_num(-1);
     for offset in candidate_offsets(drift) {

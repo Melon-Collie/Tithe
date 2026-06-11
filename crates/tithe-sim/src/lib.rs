@@ -288,6 +288,18 @@ impl Simulation {
                 self.agents[i].attributes.stripping - self.agents[carrier_idx].attributes.handling;
             let pct = (self.config.strip_even_pct + gap * self.config.strip_spread_pct)
                 .clamp(Fx::from_num(5), Fx::from_num(95));
+
+            // A containing role (Anchor) won't commit a long-odds lunge — better
+            // to hold the line than whiff and open a seam.
+            let lunge_gate = self
+                .config
+                .defense_bias(self.agents[i].defend_role)
+                .lunge_min_prob
+                * Fx::from_num(100);
+            if pct < lunge_gate {
+                continue;
+            }
+
             let success_pct = pct.to_num::<u64>();
             let chance = success_pct as u8;
             if self.rng.below(100) < success_pct {
@@ -828,5 +840,23 @@ mod tests {
             sim.shot_probability(d(2), acc, hi, Fx::from_num(6) / Fx::from_num(10))
                 < sim.shot_probability(d(2), acc, hi, no_contest)
         );
+    }
+
+    /// The defensive-role table has the intended shape: a Presser breaks shape
+    /// from further and a containing Anchor holds tighter and gates its lunge.
+    #[test]
+    fn defense_bias_table_shapes_press_vs_contain() {
+        let cfg = SimConfig::default();
+        let one = Fx::from_num(1);
+        let presser = cfg.defense_bias(OutOfPossessionRole::Presser);
+        let anchor = cfg.defense_bias(OutOfPossessionRole::Anchor);
+        // Presser hounds from distance; Anchor only engages when close.
+        assert!(presser.contest_range_mult > one);
+        assert!(anchor.contest_range_mult < one);
+        // The Anchor contains — it won't commit a long-odds lunge.
+        assert!(anchor.lunge_min_prob > Fx::from_num(0));
+        assert_eq!(presser.lunge_min_prob, Fx::from_num(0));
+        // The Anchor holds its shape tighter than it drifts by default.
+        assert!(anchor.drift_mult < one);
     }
 }

@@ -114,12 +114,19 @@ pub struct SimConfig {
     /// Per-in-possession-role weighting on the carry/pass/shoot decision — the
     /// role-tuning table (see [`RoleBiases`]).
     pub role_biases: RoleBiases,
+    /// Per-out-of-possession-role weighting on defending (see [`DefenseBiases`]).
+    pub defense_biases: DefenseBiases,
 }
 
 impl SimConfig {
     /// The on-ball bias for an in-possession role (shorthand for the table).
     pub fn on_ball_bias(&self, role: InPossessionRole) -> OnBallBias {
         self.role_biases.for_role(role)
+    }
+
+    /// The defensive bias for an out-of-possession role (shorthand for the table).
+    pub fn defense_bias(&self, role: OutOfPossessionRole) -> DefenseBias {
+        self.defense_biases.for_role(role)
     }
 }
 
@@ -188,6 +195,21 @@ impl Default for SimConfig {
                     stay_at_home: bias(40, 130, 70, 0, 40),
                     sniper: bias(100, 90, 130, 45, 90),
                     perimeter_shooter: bias(90, 90, 150, 0, 100),
+                }
+            },
+            // The defensive-role tuning table (contest-range / drift multipliers
+            // in %, lunge gate in % strip-chance). Edit a row to change a role.
+            defense_biases: {
+                let def = |contest: u32, drift: u32, lunge_gate: u32| DefenseBias {
+                    contest_range_mult: Fx::from_num(contest) / Fx::from_num(100),
+                    drift_mult: Fx::from_num(drift) / Fx::from_num(100),
+                    lunge_min_prob: Fx::from_num(lunge_gate) / Fx::from_num(100),
+                };
+                DefenseBiases {
+                    //                contest drift lunge_gate
+                    balanced: def(100, 100, 0),
+                    presser: def(160, 120, 0), // hounds from distance, lunges
+                    anchor: def(60, 50, 40),   // holds deep, contains (no <40% lunge)
                 }
             },
         }
@@ -384,6 +406,40 @@ impl RoleBiases {
             InPossessionRole::StayAtHome => self.stay_at_home,
             InPossessionRole::Sniper => self.sniper,
             InPossessionRole::PerimeterShooter => self.perimeter_shooter,
+        }
+    }
+}
+
+/// Per-[`OutOfPossessionRole`] weighting on defending — how far a defender
+/// breaks shape, how tightly it holds, and whether it commits to a strip. Like
+/// [`OnBallBias`], the whole defensive-role tuning surface.
+#[derive(Debug, Clone, Copy)]
+pub struct DefenseBias {
+    /// Scales how far the carrier must be before this defender breaks shape to
+    /// close down (Presser ↑ hounds from distance, Anchor ↓ holds until close).
+    pub contest_range_mult: Fx,
+    /// Scales off-ball drift from the anchor (Anchor ↓ = disciplined deep cover).
+    pub drift_mult: Fx,
+    /// A defender won't commit a lunge whose strip chance is below this — an
+    /// Anchor *contains* (no whiff, no seam) rather than gambling. 0 = always lunge.
+    pub lunge_min_prob: Fx,
+}
+
+/// The tunable per-[`OutOfPossessionRole`] bias table (a [`SimConfig`] dial).
+#[derive(Debug, Clone, Copy)]
+pub struct DefenseBiases {
+    pub balanced: DefenseBias,
+    pub presser: DefenseBias,
+    pub anchor: DefenseBias,
+}
+
+impl DefenseBiases {
+    /// The bias for a given out-of-possession role.
+    pub fn for_role(&self, role: OutOfPossessionRole) -> DefenseBias {
+        match role {
+            OutOfPossessionRole::Balanced => self.balanced,
+            OutOfPossessionRole::Presser => self.presser,
+            OutOfPossessionRole::Anchor => self.anchor,
         }
     }
 }
