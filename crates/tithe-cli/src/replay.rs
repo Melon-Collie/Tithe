@@ -5,7 +5,7 @@
 //! viewer template.
 
 use serde::Serialize;
-use tithe_sim::{Event, Possession, Simulation, Vec2};
+use tithe_sim::{Event, MatchSetup, Possession, Role, Vec2};
 
 const TEMPLATE: &str = include_str!("../viewer/template.html");
 
@@ -28,7 +28,9 @@ struct Arena {
 #[derive(Serialize)]
 struct AgentMeta {
     id: u32,
+    name: String,
     team: u8,
+    role: Role,
 }
 
 #[derive(Serialize)]
@@ -54,8 +56,8 @@ fn xy(p: Vec2) -> [f32; 2] {
     [p.x.to_num::<f32>(), p.y.to_num::<f32>()]
 }
 
-fn build_export(seed: u64, max_ticks: u64) -> MatchExport {
-    let mut sim = Simulation::new(seed);
+fn build_export(setup: &Option<MatchSetup>, seed: u64, max_ticks: u64) -> MatchExport {
+    let mut sim = crate::build_sim(setup, seed);
 
     let cfg = sim.config();
     let arena = Arena {
@@ -70,7 +72,9 @@ fn build_export(seed: u64, max_ticks: u64) -> MatchExport {
         .iter()
         .map(|a| AgentMeta {
             id: a.id,
+            name: a.name.clone(),
             team: a.team,
+            role: a.role,
         })
         .collect();
 
@@ -119,8 +123,9 @@ pub fn run(args: &[String]) {
     let seed = crate::flag_or(args, "--seed", 1u64);
     let out = crate::flag(args, "--out").unwrap_or_else(|| "match.html".to_string());
     let max_ticks = crate::flag_or(args, "--max-ticks", 100_000u64);
+    let setup = crate::load_setup(args);
 
-    let export = build_export(seed, max_ticks);
+    let export = build_export(&setup, seed, max_ticks);
     let json = serde_json::to_string(&export).expect("serialize match");
     let html = TEMPLATE.replace("__MATCH_DATA__", &json);
     std::fs::write(&out, html).expect("write output file");

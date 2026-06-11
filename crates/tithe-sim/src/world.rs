@@ -9,6 +9,7 @@
 
 use crate::fx::{Fx, Vec2};
 use crate::rng::Rng;
+use serde::{Deserialize, Serialize};
 
 /// Tunable simulation parameters — dials set by prototype + AI-vs-AI sim, not
 /// commitments (design doc §13), hence config rather than baked-in.
@@ -233,13 +234,41 @@ fn draw_attribute(rng: &mut Rng) -> Fx {
     Fx::from_num(25 + rng.below(61)) / Fx::from_num(100)
 }
 
-/// A single agent: identity, team, where it is, where it's headed, its home
-/// anchor, how many ticks it remains staggered (0 = active), its stamina
-/// (1 = fresh, draining over a soul), and its attributes.
+/// The coach's casting of a player — one of the two coach inputs (the other is
+/// the positioning template / [`Formation`]). A role is assigned *per player*
+/// (§3: recast = change a player's role).
+///
+/// **Today it is a label,** carried through to the event-stream consumers (it
+/// shows in the play-by-play roster). Role-*conditioned behavior* — the
+/// considerations and trigger verb each role implies (§1, §3) — is a later
+/// slice; this enum is the seam it will hang on. `Rover` is the neutral
+/// two-way default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    /// Up-top offering threat — the player you cast to score.
+    Finisher,
+    /// Distributor / outlet — moves the soul and finds the open receiver.
+    Playmaker,
+    /// High closer — breaks shape to pressure the enemy carrier.
+    Presser,
+    /// Deep safety / help defender near its own goal.
+    Anchor,
+    /// Neutral two-way player (the default casting).
+    #[default]
+    Rover,
+}
+
+/// A single agent: identity (id + display `name`), team, its coach-assigned
+/// `role`, where it is, where it's headed, its home anchor, how many ticks it
+/// remains staggered (0 = active), its stamina (1 = fresh, draining over a
+/// soul), and its attributes.
 #[derive(Debug, Clone)]
 pub struct Agent {
     pub id: u32,
+    pub name: String,
     pub team: u8,
+    pub role: Role,
     pub pos: Vec2,
     pub target: Vec2,
     pub anchor: Vec2,
@@ -308,6 +337,9 @@ pub fn step_toward(pos: Vec2, target: Vec2, max_step: Fx) -> Vec2 {
 /// Build both teams in formation: team 0 from the base anchors, team 1 mirrored
 /// across x. Every agent starts *on* its anchor (a consistent faceoff for every
 /// soul — no random scatter). Ids index into the returned vec (team 0 first).
+///
+/// This is the default, RNG-rolled roster ([`Simulation::new`](crate::Simulation::new));
+/// an *authored* roster comes through [`crate::setup::build_agents`].
 pub fn build_two_teams(base: &Formation, rng: &mut Rng) -> Vec<Agent> {
     let mut agents = Vec::with_capacity(base.anchors.len() * 2);
     for &anchor in &base.anchors {
@@ -323,7 +355,9 @@ fn push_agent(agents: &mut Vec<Agent>, team: u8, anchor: Vec2, rng: &mut Rng) {
     let id = agents.len() as u32;
     agents.push(Agent {
         id,
+        name: format!("P{id}"),
         team,
+        role: Role::default(),
         pos: anchor,
         target: anchor,
         anchor,

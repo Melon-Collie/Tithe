@@ -190,12 +190,14 @@ fn candidate_offsets(drift: Fx) -> [Vec2; 9] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::{Attributes, Possession};
+    use crate::world::{Attributes, Possession, Role};
 
     fn agent(id: u32, team: u8, x: i32, y: i32) -> Agent {
         Agent {
             id,
+            name: format!("P{id}"),
             team,
+            role: Role::default(),
             pos: Vec2::new(Fx::from_num(x), Fx::from_num(y)),
             target: Vec2::default(),
             anchor: Vec2::new(Fx::from_num(99), Fx::from_num(0)),

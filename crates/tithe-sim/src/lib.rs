@@ -41,6 +41,7 @@ pub mod decide;
 pub mod event;
 pub mod fx;
 pub mod rng;
+pub mod setup;
 pub mod value;
 pub mod world;
 
@@ -48,6 +49,8 @@ pub use decide::Intent;
 pub use event::Event;
 pub use fx::{Fx, Vec2, WideFx};
 pub use rng::Rng;
+pub use setup::{MatchSetup, SetupError};
+pub use world::Role;
 pub use world::{Agent, Formation, Possession, SimConfig, Soul};
 
 /// Opaque seed for a simulation run. Same seed + same inputs → same event
@@ -80,21 +83,43 @@ pub struct Simulation {
 }
 
 impl Simulation {
-    /// Start a fresh run from `seed`: two default teams, a loose soul at center.
+    /// Start a fresh run from `seed`: two default teams (RNG-rolled attributes),
+    /// a loose soul at center. For an *authored* matchup, see [`from_setup`].
+    ///
+    /// [`from_setup`]: Simulation::from_setup
     pub fn new(seed: Seed) -> Self {
         let config = SimConfig::default();
         let formation = Formation::default_seven();
-        let goals = config.goals();
         let mut rng = Rng::new(seed);
         let agents = world::build_two_teams(&formation, &mut rng);
-        let soul = Soul::loose_at(Vec2::default());
+        Self::assemble(seed, config, agents, rng)
+    }
+
+    /// Start a run from an authored [`MatchSetup`] (the coach-input boundary) and
+    /// `seed`. The roster — attributes, roles, formations — comes from the setup;
+    /// the seed still drives all match dynamics. Returns a [`SetupError`] if the
+    /// setup is malformed (bad roster size, unknown formation, …).
+    pub fn from_setup(setup: &MatchSetup, seed: Seed) -> Result<Self, SetupError> {
+        let agents = setup::build_agents(setup)?;
+        Ok(Self::assemble(
+            seed,
+            SimConfig::default(),
+            agents,
+            Rng::new(seed),
+        ))
+    }
+
+    /// Shared assembly for both construction paths: a loose soul at center, an
+    /// empty score, no winner, no offering in progress.
+    fn assemble(seed: Seed, config: SimConfig, agents: Vec<Agent>, rng: Rng) -> Self {
+        let goals = config.goals();
         Self {
             seed,
             tick: 0,
             config,
             goals,
             agents,
-            soul,
+            soul: Soul::loose_at(Vec2::default()),
             rng,
             score: [0, 0],
             winner: None,

@@ -15,3 +15,7 @@ workspace = true
 # contract. Chosen over hand-rolled math: battle-tested, minimal deps (typenum),
 # WASM-ready, and easier to audit. (CLAUDE.md → Determinism rules / Stack.)
 fixed = "1"
+# Derive-only: lets the sim's *input boundary* types (MatchSetup, roles, rosters)
+# be (de)serialized by a consumer (§9 "serialized inputs go in"). No floats and
+# no nondeterminism are introduced — the setup format carries integers, never Fx.
+serde = { version = "1", features = ["derive"] }

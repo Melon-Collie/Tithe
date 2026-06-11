@@ -5,13 +5,14 @@
 //! non-terminating match is the §1 elite-D-vs-elite-D grind, the pathology we
 //! tune against. Reporting math uses floats — fine, this is a consumer.
 
-use tithe_sim::{Event, Simulation};
+use tithe_sim::Event;
 
 const MAX_TICKS: u64 = 200_000;
 
 pub fn run(args: &[String]) {
     let matches = crate::flag_or(args, "--matches", 100u32);
     let base_seed = crate::flag_or(args, "--seed", 1u64);
+    let setup = crate::load_setup(args);
 
     let mut finished = 0u32;
     let mut total_ticks = 0u64;
@@ -25,7 +26,7 @@ pub fn run(args: &[String]) {
     let mut offers_missed = 0u64;
 
     for m in 0..matches {
-        let mut sim = Simulation::new(base_seed.wrapping_add(u64::from(m)));
+        let mut sim = crate::build_sim(&setup, base_seed.wrapping_add(u64::from(m)));
         let mut ticks = 0u64;
         while sim.winner().is_none() && ticks < MAX_TICKS {
             for event in sim.tick() {

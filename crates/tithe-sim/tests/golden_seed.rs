@@ -56,6 +56,33 @@ fn simulation_is_reproducible() {
 }
 
 #[test]
+fn from_setup_is_reproducible_and_authored() {
+    use tithe_sim::{Fx, MatchSetup};
+    let setup = MatchSetup::default_match();
+    let run = |seed| {
+        let mut sim = Simulation::from_setup(&setup, seed).expect("valid setup");
+        let mut stream = Vec::new();
+        for _ in 0..200 {
+            stream.extend(sim.tick());
+        }
+        stream
+    };
+    // An authored match is a pure function of the seed (no RNG-rolled roster).
+    assert_eq!(run(123), run(123));
+    // The roster is the authored one, not the default — Sear's finishing is 0.85.
+    let sim = Simulation::from_setup(&setup, 1).expect("valid setup");
+    let sear = sim
+        .agents()
+        .iter()
+        .find(|a| a.name == "Sear")
+        .expect("Sear");
+    assert_eq!(
+        sear.attributes.finishing,
+        Fx::from_num(85) / Fx::from_num(100)
+    );
+}
+
+#[test]
 fn two_teams_of_seven() {
     let sim = Simulation::new(0);
     assert_eq!(sim.agents().len(), 14);

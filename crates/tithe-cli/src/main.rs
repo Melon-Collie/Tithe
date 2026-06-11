@@ -1,19 +1,28 @@
 //! `tithe` — command-line consumers of the sim's event stream.
 //!
 //! The sim is headless and never knows it's watched; this binary is one of its
-//! consumers (CLAUDE.md → Committed architecture). Two subcommands:
+//! consumers (CLAUDE.md → Committed architecture). Subcommands:
 //!
 //! - `play` — run one match and write a self-contained HTML replay you open in
 //!   a browser. The "is it fun to *watch*" test.
 //! - `stats` — run a batch of AI-vs-AI matches and print tuning metrics. The
 //!   "do the numbers work" test (the doc's stated tuning method).
+//! - `log` — print a narrated play-by-play of one match.
+//! - `init` — write an editable example match-setup file (the coach-input
+//!   boundary), the stand-in for the game's roster/tactics screens.
+//!
+//! `play`/`stats`/`log` accept `--setup FILE` to run an authored matchup instead
+//! of the default RNG-rolled teams.
 //!
 //! Floats and serialization live here at the render boundary — never in
 //! `tithe-sim`.
 
+mod init;
 mod log;
 mod replay;
 mod stats;
+
+use tithe_sim::{MatchSetup, Simulation};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -21,13 +30,44 @@ fn main() {
         Some("play") => replay::run(&args[2..]),
         Some("stats") => stats::run(&args[2..]),
         Some("log") => log::run(&args[2..]),
+        Some("init") => init::run(&args[2..]),
         _ => {
             eprintln!("usage:");
-            eprintln!("  tithe play  [--seed N] [--out FILE] [--max-ticks N]");
-            eprintln!("  tithe stats [--matches N] [--seed N]");
-            eprintln!("  tithe log   [--seed N] [--max-ticks N]");
+            eprintln!("  tithe play  [--seed N] [--out FILE] [--max-ticks N] [--setup FILE]");
+            eprintln!("  tithe stats [--matches N] [--seed N] [--setup FILE]");
+            eprintln!("  tithe log   [--seed N] [--max-ticks N] [--setup FILE]");
+            eprintln!("  tithe init  [--out FILE]   # write an editable example setup");
             std::process::exit(2);
         }
+    }
+}
+
+/// Load the `--setup FILE` matchup if the flag is present; `None` means use the
+/// default RNG-rolled teams. Exits with a clear message on a missing or invalid
+/// file, so authoring mistakes fail loudly rather than silently.
+pub(crate) fn load_setup(args: &[String]) -> Option<MatchSetup> {
+    let path = flag(args, "--setup")?;
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        eprintln!("error: cannot read setup '{path}': {e}");
+        std::process::exit(2);
+    });
+    let setup = toml::from_str::<MatchSetup>(&text).unwrap_or_else(|e| {
+        eprintln!("error: invalid setup '{path}': {e}");
+        std::process::exit(2);
+    });
+    Some(setup)
+}
+
+/// Build a simulation for `seed`, from an authored `setup` if one was loaded,
+/// else from the default teams. Exits on a malformed setup (bad roster size,
+/// unknown formation, …).
+pub(crate) fn build_sim(setup: &Option<MatchSetup>, seed: u64) -> Simulation {
+    match setup {
+        Some(setup) => Simulation::from_setup(setup, seed).unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }),
+        None => Simulation::new(seed),
     }
 }
 
