@@ -4,9 +4,9 @@ A pure-manager sim for an invented ball sport — box-lacrosse bones under a fir
 
 The canonical design source is [`fantasy-sport-sim-design.md`](./fantasy-sport-sim-design.md). Open forks live there under **§13 Open / parked questions** — don't duplicate or re-litigate them here; when one is settled, it's settled in the doc. Section references below (§9, §10, etc.) point into that doc.
 
-## Status (pre-implementation — delete when code lands)
+## Status
 
-**No code exists yet.** The design doc is unusually complete; the sim core (Rust) and the decoupled architecture are settled, everything else (front-end framework, distribution, the full attribute list) is deliberately open. First milestone is a headless Rust sim-core prototype to prove the decoupling and the fun. Until code lands, every architectural claim below is *intent*, not a description of behavior.
+The headless Rust sim core (`crates/tithe-sim`) and a CLI consumer (`crates/tithe-cli` — HTML replay, AI-vs-AI stats batch, play-by-play log) are built: the invented sport plays AI-vs-AI end to end (faceoff → strip → EV carry/pass → wind-up offering → first-to-X), on a shared value field with per-player attributes and zonal defense. **The code and its tests are the authority on how it behaves;** this file and the design doc capture *intent and rationale*. Front end and distribution are still unbuilt and open.
 
 ## Source of truth
 
@@ -16,6 +16,7 @@ Consequences for how we work (learned the hard way on a sibling project where st
 - **No standing roadmap/plan doc.** Sequencing lives in an ephemeral task list that *shrinks* as work completes — a finished task is removed, never left as "done" to diverge from what the code became.
 - **Tests are the living spec.** The sim is pure and headlessly testable, so behavior is pinned by tests that fail when they rot. Prefer a test over prose when documenting behavior.
 - **Prune forward-looking spec as code lands.** When a section here starts describing something the code now owns, shrink it to the load-bearing invariant or delete it.
+- **The design doc is a point-in-time *mindset* snapshot, not a living spec.** It has already drifted from how the code behaves, and that's expected — keeping a prose design doc in sync with bugfixes and behavior tweaks is a losing game (a pain learned the hard way). Read it for the *grain and the why*, never for what the code does. The honest division of labor: **self-documenting code** carries behavior (favor a clear name / doc-comment / test over external prose); **CLAUDE.md** carries the load-bearing constraints and the non-obvious things you couldn't reconstruct from the code; the **design doc** carries original intent.
 
 ## Workflow
 
@@ -26,7 +27,7 @@ Consequences for how we work (learned the hard way on a sibling project where st
 
 ## Working philosophy
 
-**Design-doc-driven.** This is a design-led project with an unusually complete doc. Before proposing or building a system, check it against the doc — the pillars and cross-cutting laws (§10), the sport genome (§1), the sim model (§2). If something isn't specified, §13 is where it gets resolved; surface the gap rather than freelancing a rule that contradicts the doc's grain.
+**Design-led, code-authoritative.** This is a design-led project, and the doc is unusually complete on *intent* — read it for the grain before proposing a system: the pillars and cross-cutting laws (§10), the sport genome (§1), the sim model (§2). But it has drifted from how the code behaves and is **not a behavior spec** — verify behavior in the code/tests, never audit code against the doc (see Source of truth). When you build something the doc didn't anticipate, that's expected; surface the gap rather than freelancing a rule that contradicts the doc's grain.
 
 **Complexity tolerance.** *"It's simpler"* is not, by itself, an argument. The default question is *"what gives the best feel / correctness / longevity?"* — not *"what's the smallest thing that works?"* Don't pre-emptively offer *"we could simplify for the prototype and clean up later"* without flagging it as a deviation from the principled-from-day-one stance. (The sibling projects ship genuinely complex netcode/sim by choice.) The counterweight specific to this project: **legibility is itself a design goal** (§2, §10) — complexity that the watch view can't narrate is the wrong kind. Spend novelty where it's load-bearing; borrow familiarity everywhere else (§10).
 

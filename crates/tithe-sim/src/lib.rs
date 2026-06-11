@@ -23,17 +23,15 @@
 //!   (`Vec`/`BTreeMap`) or sort-before-iterate; never let `HashMap` iteration
 //!   order leak into the event stream.
 //!
-//! ## Status (a playable sport with contested scoring)
+//! ## Orientation
 //!
-//! What exists: fixed-point math, the two-clock tick loop, the utility decision
-//! model with a shared value field and value-driven off-ball positioning, two
-//! teams, a faceoff draw (nearest contests), the strip verb (win/whiff/stagger),
-//! turnovers, passing with in-flight interception, stamina, agent separation,
-//! per-player attributes (Finishing/Stripping/Contesting, uniform for now), the
-//! offering as a wind-up skill check (Finishing-gated, contestable, miss →
-//! rebound), and a first-to-X winner. What's still open: per-player attribute
-//! variation + generation, the anti-loiter aura, and phase-conditioned (with/
-//! without ball) formations (design doc §1, §3, §4, §13).
+//! The sport plays AI-vs-AI end to end. One tick is [`Simulation::tick`]; read
+//! it top-to-bottom for the whole loop. The pieces live in: [`fx`] (fixed-point
+//! math), [`rng`] (seeded RNG), [`world`] (config, formation, agents, the value
+//! field's inputs), [`decide`] (the utility scorer and off-ball positioning),
+//! [`value`] (the xT-style value field and cover-shadow), and [`event`] (the
+//! output stream). The code and its tests are the spec; this crate is the
+//! authority on behavior (CLAUDE.md → Source of truth).
 
 // Determinism guards specific to the sim core (front-end Rust crates, if any,
 // would legitimately use floats, so these are not workspace-wide).
