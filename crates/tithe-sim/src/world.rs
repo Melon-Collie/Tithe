@@ -113,6 +113,11 @@ pub struct SimConfig {
     /// Max positional noise added to a Positioning-0 player's anchor each window
     /// (scales with `1 − positioning`; a disciplined player adds ~none).
     pub positioning_noise_max: Fx,
+    /// Perception error a Awareness-0 player has reading an object at
+    /// `awareness_ref_dist` (scales with `1 − awareness` and with distance).
+    pub awareness_noise_max: Fx,
+    /// Reference distance for perception error — error grows with distance/this.
+    pub awareness_ref_dist: Fx,
     /// Agents closer than this push apart (kept below strip_radius so it never
     /// blocks a legitimate contest).
     pub separation_radius: Fx,
@@ -184,6 +189,8 @@ impl Default for SimConfig {
             pace_ceil: Fx::from_num(125) / Fx::from_num(100),          // 1.25 (Pace 1)
             drift_radius: Fx::from_num(10),
             positioning_noise_max: Fx::from_num(8), // Positioning 0.5 ⇒ ±4 of drift
+            awareness_noise_max: Fx::from_num(6),   // Awareness 0 at ref dist ⇒ ±6
+            awareness_ref_dist: Fx::from_num(20),
             separation_radius: Fx::from_num(5) / Fx::from_num(2), // 2.5 (< strip_radius 3)
             separation_step: Fx::from_num(1),
             // The role-tuning table. Each row weights an in-possession role's
@@ -296,6 +303,11 @@ pub struct Attributes {
     /// first and closes down harder). Maps to a speed multiplier between
     /// `pace_floor` and `pace_ceil`.
     pub pace: Fx,
+    /// Perception quality — how accurately the player reads the world he decides
+    /// against. A low score perceives the ball, teammates, and opponents at noisy
+    /// positions (worse the further away), so he shades wrong, blows assignments,
+    /// and throws into coverage he didn't see (§2). The genius layer.
+    pub awareness: Fx,
 }
 
 impl Attributes {
@@ -312,6 +324,7 @@ impl Attributes {
             passing: mid,
             positioning: mid,
             pace: mid,
+            awareness: mid,
         }
     }
 
@@ -329,6 +342,7 @@ impl Attributes {
             passing: draw_attribute(rng),
             positioning: draw_attribute(rng),
             pace: draw_attribute(rng),
+            awareness: draw_attribute(rng),
         }
     }
 }

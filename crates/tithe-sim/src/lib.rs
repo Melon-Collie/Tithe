@@ -64,10 +64,18 @@ struct OfferState {
     ticks_left: u32,
 }
 
+/// A seeded random scalar in `[-1, 1]` (0.001 steps) — the building block for
+/// positional and perception noise. Trig-free and deterministic.
+fn signed_unit(rng: &mut Rng) -> Fx {
+    let r = rng.below(2001) as i64 - 1000; // [-1000, 1000]
+    Fx::from_num(r) / Fx::from_num(1000)
+}
+
 /// A headless, deterministic simulation.
 ///
-/// Inputs go in, an event stream comes out (see [`Simulation::tick`]). Slice 3
-/// runs two teams contesting one soul under the two-clock loop.
+/// Inputs go in, an event stream comes out (see [`Simulation::tick`]). Two teams
+/// contest one soul under the two-clock loop, deciding on a perceived world and
+/// resolving on the real one.
 #[derive(Debug, Clone)]
 pub struct Simulation {
     seed: Seed,
@@ -217,52 +225,105 @@ impl Simulation {
     fn run_decisions(&mut self) {
         let one = Fx::from_num(1);
         let carrier = self.carrier_info();
-        let mut team_pos: [Vec<Vec2>; 2] = [Vec::new(), Vec::new()];
-        for agent in &self.agents {
-            team_pos[agent.team as usize].push(agent.pos);
-        }
-        let nearest = self.nearest_to_soul();
+        let real_soul = self.soul.pos;
+        let possession = self.soul.possession;
+        // A real snapshot to perceive against (positions don't change in here).
+        let real_pos: Vec<Vec2> = self.agents.iter().map(|a| a.pos).collect();
+        let teams: Vec<u8> = self.agents.iter().map(|a| a.team).collect();
+        let active: Vec<bool> = self.agents.iter().map(|a| a.is_active()).collect();
+        let n = self.agents.len();
 
-        for i in 0..self.agents.len() {
+        for i in 0..n {
             // Commit this window's phase: attacking shape if my team holds the
-            // soul, defending shape otherwise (enemy-held or loose). The anchor
-            // flips here on the slow clock, so the team morphs between shapes at
-            // the decision boundary, never mid-motion.
-            let in_possession = carrier.is_some_and(|c| c.team == self.agents[i].team);
+            // soul, defending shape otherwise. The anchor flips here on the slow
+            // clock, so the team morphs between shapes at the boundary.
+            let in_possession = carrier.is_some_and(|c| c.team == teams[i]);
             self.agents[i].apply_phase(in_possession);
 
             // Anchor discipline: a low-Positioning player works off a noisy
-            // anchor (he can't hold his exact spot), re-erring each window. The
-            // noise is seeded, so it stays deterministic.
+            // anchor (he can't hold his exact spot), re-erring each window.
             let slack =
                 self.config.positioning_noise_max * (one - self.agents[i].attributes.positioning);
-            let noise = Vec2::new(
-                self.rng_signed_unit() * slack,
-                self.rng_signed_unit() * slack,
+            let anchor_noise = Vec2::new(
+                signed_unit(&mut self.rng) * slack,
+                signed_unit(&mut self.rng) * slack,
             );
-            self.agents[i].anchor = self.agents[i].anchor + noise;
+            self.agents[i].anchor = self.agents[i].anchor + anchor_noise;
 
-            let is_nearest = nearest[self.agents[i].team as usize] == Some(self.agents[i].id);
+            // Awareness: build this agent's private, noisy read of everyone and
+            // the soul. He decides on *this* picture; the outcome resolves on the
+            // truth — so a bad read narrates (shades wrong, blows the assignment,
+            // throws into coverage he didn't see).
+            let me = real_pos[i];
+            let aw = self.agents[i].attributes.awareness;
+            let mut perceived: Vec<Vec2> = Vec::with_capacity(n);
+            for (j, &rp) in real_pos.iter().enumerate() {
+                perceived.push(if j == i {
+                    me // proprioception — you always know where you are
+                } else {
+                    Self::perceive(&mut self.rng, &self.config, rp, me, aw)
+                });
+            }
+            // The soul rides its carrier (perceiving it = perceiving him); a loose
+            // soul is perceived on its own.
+            let p_soul = match carrier {
+                Some(c) => perceived[c.id as usize],
+                None => Self::perceive(&mut self.rng, &self.config, real_soul, me, aw),
+            };
+            let p_carrier = carrier.map(|c| decide::CarrierInfo {
+                pos: perceived[c.id as usize],
+                ..c
+            });
+            let team = teams[i] as usize;
+            let p_allies: Vec<Vec2> = (0..n)
+                .filter(|&j| teams[j] as usize == team)
+                .map(|j| perceived[j])
+                .collect();
+            let p_enemies: Vec<Vec2> = (0..n)
+                .filter(|&j| teams[j] as usize != team)
+                .map(|j| perceived[j])
+                .collect();
+
+            // "Am I the man?" judged from his perceived world — a bad read blows
+            // the assignment (he thinks a teammate has it, or over-commits).
+            let own_dist = me.distance_to(p_soul);
+            let is_nearest = (0..n).all(|j| {
+                !active[j]
+                    || teams[j] as usize != team
+                    || j == i
+                    || own_dist <= perceived[j].distance_to(p_soul)
+            });
+
+            let p_soul_state = Soul {
+                pos: p_soul,
+                possession,
+            };
             let intent = decide::choose_intent(
                 &self.agents[i],
-                &self.soul,
-                carrier,
+                &p_soul_state,
+                p_carrier,
                 is_nearest,
                 &self.config,
             );
             let agent = &self.agents[i];
             let target = if intent == decide::Intent::HoldAnchor {
-                let t = agent.team as usize;
                 decide::off_ball_target(
                     agent,
-                    carrier,
+                    p_carrier,
                     self.goals,
-                    &team_pos[t],
-                    &team_pos[1 - t],
+                    &p_allies,
+                    &p_enemies,
                     &self.config,
                 )
             } else {
-                decide::target_for(intent, agent, &self.soul, carrier, self.goals, &self.config)
+                decide::target_for(
+                    intent,
+                    agent,
+                    &p_soul_state,
+                    p_carrier,
+                    self.goals,
+                    &self.config,
+                )
             };
             self.agents[i].target = target;
         }
@@ -337,29 +398,29 @@ impl Simulation {
         }
     }
 
-    /// A seeded random scalar in `[-1, 1]` (0.001 steps) — the building block for
-    /// positional noise. Trig-free and deterministic.
-    fn rng_signed_unit(&mut self) -> Fx {
-        let r = self.rng.below(2001) as i64 - 1000; // [-1000, 1000]
-        Fx::from_num(r) / Fx::from_num(1000)
-    }
-
-    /// The id of the agent nearest the soul (loose or carried) on each team.
-    /// Only that agent leaves the shape to engage — it contests a loose draw,
-    /// or (on the defending team) challenges the carrier.
-    fn nearest_to_soul(&self) -> [Option<u32>; 2] {
-        let mut best: [Option<(Fx, u32)>; 2] = [None, None];
-        for agent in &self.agents {
-            if !agent.is_active() {
-                continue;
-            }
-            let dist = agent.pos.distance_to(self.soul.pos);
-            let slot = &mut best[agent.team as usize];
-            if slot.is_none_or(|(d, _)| dist < d) {
-                *slot = Some((dist, agent.id));
-            }
-        }
-        [best[0].map(|(_, id)| id), best[1].map(|(_, id)| id)]
+    /// An observer's *perceived* position of a real point: the truth plus seeded
+    /// noise scaled by `(1 − awareness)` and by distance (far things read fuzzier,
+    /// near things sharp). Always consumes two draws, so the RNG stream is
+    /// independent of the awareness value. This is the §2 "input quality, not
+    /// compute" channel — the decision runs on what the agent *thinks* he sees.
+    fn perceive(
+        rng: &mut Rng,
+        config: &SimConfig,
+        real: Vec2,
+        observer: Vec2,
+        awareness: Fx,
+    ) -> Vec2 {
+        let one = Fx::from_num(1);
+        let base = config.awareness_noise_max * (one - awareness);
+        let dist_scale = (observer.distance_to(real) / config.awareness_ref_dist).clamp(
+            Fx::from_num(1) / Fx::from_num(4), // near floor: 0.25 (even point-blank is a little fuzzy)
+            Fx::from_num(3),                   // far cap: 3× the reference error
+        );
+        let mag = base * dist_scale;
+        Vec2::new(
+            real.x + signed_unit(rng) * mag,
+            real.y + signed_unit(rng) * mag,
+        )
     }
 
     /// Move every active agent toward its target at a stamina-scaled speed, and
@@ -487,24 +548,45 @@ impl Simulation {
         let aversion = self.config.turnover_aversion;
         let zero = Fx::from_num(0);
         let one = Fx::from_num(1);
+        let half = one / Fx::from_num(2);
 
-        let enemies: Vec<Vec2> = self.team_positions(1 - team);
-        let allies: Vec<Vec2> = self.team_positions(team);
+        // Awareness: the carrier decides against his *perceived* field (positions
+        // noised by his Awareness), but the pass *outcome* resolves on the truth —
+        // so he routes into a checker he didn't see, or throws into coverage that
+        // wasn't where he thought it was.
+        let n = self.agents.len();
+        let real_pos: Vec<Vec2> = self.agents.iter().map(|a| a.pos).collect();
+        let teams: Vec<u8> = self.agents.iter().map(|a| a.team).collect();
+        let active: Vec<bool> = self.agents.iter().map(|a| a.is_active()).collect();
+        let aw = attrs.awareness;
+        let mut perceived: Vec<Vec2> = Vec::with_capacity(n);
+        for (j, &rp) in real_pos.iter().enumerate() {
+            perceived.push(if j == carrier_id as usize {
+                carrier_pos
+            } else {
+                Self::perceive(&mut self.rng, &self.config, rp, carrier_pos, aw)
+            });
+        }
+        let p_enemies: Vec<Vec2> = (0..n)
+            .filter(|&j| teams[j] != team)
+            .map(|j| perceived[j])
+            .collect();
+        let p_allies: Vec<Vec2> = (0..n)
+            .filter(|&j| teams[j] == team)
+            .map(|j| perceived[j])
+            .collect();
 
-        // Carrying: the best route toward goal that dodges pressure (the carry's
-        // value scaled by the role's appetite — Dangler ↑, Stay-at-home ↓).
+        // Carrying: best route toward goal that dodges *perceived* pressure.
         let (carry_target, carry_ev) = self.best_carry_route(
             carrier_pos,
             my_goal,
             enemy_goal,
-            &enemies,
-            &allies,
+            &p_enemies,
+            &p_allies,
             bias.carry_mult,
         );
 
-        // Shooting from here: score chance falls off with distance (further for
-        // high-Range players), against what a missed shot's rebound concedes.
-        // The role scales the appetite; a patient role won't fire below its bar.
+        // Shooting from here (against the pressure he feels up close — real).
         let distance = carrier_pos.distance_to(my_goal);
         let shoot_contest = self.offering_contest(team, carrier_pos);
         let shoot_prob =
@@ -512,38 +594,36 @@ impl Simulation {
         let can_shoot = shoot_prob >= bias.min_shoot_prob;
         let shoot_ev = shoot_prob * self.config.shot_value * bias.shoot_mult
             - (one - shoot_prob)
-                * value::value_at(carrier_pos, enemy_goal, &allies, &self.config)
+                * value::value_at(carrier_pos, enemy_goal, &p_allies, &self.config)
                 * aversion;
 
-        // Passing: the best receiver by EV.
-        let mut best_pass: Option<(u32, Fx, Option<u32>, Fx)> = None; // recv, completion, blocker, ev
-        for agent in &self.agents {
-            if agent.team != team || agent.id == carrier_id || !agent.is_active() {
+        // Passing: best receiver by *perceived* EV (perceived lane + positions).
+        let mut best_pass: Option<(u32, Fx)> = None; // receiver, perceived ev
+        for j in 0..n {
+            if teams[j] != team || j == carrier_id as usize || !active[j] {
                 continue;
             }
-            if carrier_pos.distance_to(agent.pos) > self.config.pass_max_dist {
+            let recv = perceived[j];
+            if carrier_pos.distance_to(recv) > self.config.pass_max_dist {
                 continue;
             }
-            let (lane, blocker) = self.pass_lane(carrier_pos, agent.pos, team);
-            // Better passers thread tighter lanes (uniform 0.5 ⇒ lane unchanged).
-            let completion =
-                (lane * (Fx::from_num(1) / Fx::from_num(2) + attrs.passing)).clamp(zero, one);
+            let lane = value::lane_clear(carrier_pos, recv, &p_enemies, &self.config);
+            let completion = (lane * (half + attrs.passing)).clamp(zero, one);
             if completion < self.config.pass_min_lane {
                 continue;
             }
-            let benefit = value::value_at(agent.pos, my_goal, &enemies, &self.config)
+            let benefit = value::value_at(recv, my_goal, &p_enemies, &self.config)
                 * completion
                 * bias.pass_mult;
-            let loss_point = blocker.map_or(agent.pos, |b| self.agents[b as usize].pos);
             let cost = (one - completion)
-                * value::value_at(loss_point, enemy_goal, &allies, &self.config)
+                * value::value_at(recv, enemy_goal, &p_allies, &self.config)
                 * aversion;
             let ev = benefit - cost;
-            if best_pass.is_none_or(|(_, _, _, e)| ev > e) {
-                best_pass = Some((agent.id, completion, blocker, ev));
+            if best_pass.is_none_or(|(_, e)| ev > e) {
+                best_pass = Some((j as u32, ev));
             }
         }
-        let best_pass_ev = best_pass.map_or(Fx::from_num(-9999), |(_, _, _, e)| e);
+        let best_pass_ev = best_pass.map_or(Fx::from_num(-9999), |(_, e)| e);
 
         // Shoot if it's allowed (past the role's gate) and the best positive option…
         if can_shoot && shoot_ev > zero && shoot_ev >= carry_ev && shoot_ev >= best_pass_ev {
@@ -556,10 +636,13 @@ impl Simulation {
             });
             return;
         }
-        // …else pass if a receiver beats carrying by the margin…
+        // …else pass if a receiver beats carrying by the margin. The CHOICE was
+        // perceived; the OUTCOME resolves on the *real* lane to the real receiver.
         if best_pass_ev > carry_ev + self.config.pass_value_margin {
-            let (receiver, completion, blocker, _) =
-                best_pass.expect("best_pass_ev came from Some");
+            let (receiver, _) = best_pass.expect("best_pass_ev came from Some");
+            let (real_lane, blocker) =
+                self.pass_lane(carrier_pos, real_pos[receiver as usize], team);
+            let completion = (real_lane * (half + attrs.passing)).clamp(zero, one);
             let pct = (completion * Fx::from_num(100)).to_num::<u64>();
             let completed = self.rng.below(100) < pct;
             let intercepted = !completed && blocker.is_some();
@@ -671,15 +754,6 @@ impl Simulation {
             }
         }
         (Fx::from_num(1) - max_block, blocker)
-    }
-
-    /// The positions of every active agent on `team`.
-    fn team_positions(&self, team: u8) -> Vec<Vec2> {
-        self.agents
-            .iter()
-            .filter(|a| a.team == team)
-            .map(|a| a.pos)
-            .collect()
     }
 
     /// Advance a pass in flight to its predetermined catcher (receiver on a
