@@ -81,13 +81,15 @@ struct MatchExport {
     winner: Option<u8>,
 }
 
-/// A narrated play-by-play line, tagged with its tick (for syncing to playback)
-/// and a `kind` (for the viewer to colour it).
+/// A narrated play-by-play line, tagged with its tick (for syncing to playback),
+/// a `kind` (for colour), and the field position where it happened (for the
+/// viewer's on-canvas flash).
 #[derive(Serialize)]
 struct MatchEvent {
     tick: u64,
     kind: &'static str,
     text: String,
+    pos: [f32; 2],
 }
 
 #[derive(Serialize)]
@@ -166,6 +168,7 @@ fn build_export(
         goal_x: cfg.goal_x.to_num(),
     };
     let souls_to_win = cfg.souls_to_win;
+    let goals = sim.config().goals();
 
     let names: Vec<String> = sim.agents().iter().map(|a| a.name.clone()).collect();
     let mut agents = Vec::new();
@@ -207,7 +210,22 @@ fn build_export(
         });
         for ev in &events {
             if let Some((kind, text)) = narrate(ev, &names) {
-                narrated.push(MatchEvent { tick, kind, text });
+                // Where to flash: the goal on a score (the soul has already reset
+                // to center by now), the ball's spot otherwise.
+                let pos = match ev {
+                    Event::OfferingResolved {
+                        carrier,
+                        scored: true,
+                        ..
+                    } => xy(goals[sim.agents()[*carrier as usize].team as usize]),
+                    _ => xy(sim.soul().pos),
+                };
+                narrated.push(MatchEvent {
+                    tick,
+                    kind,
+                    text,
+                    pos,
+                });
             }
         }
         frames.push(Frame {

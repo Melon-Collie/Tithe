@@ -103,6 +103,7 @@
   <script>
   // ---- arena (SimConfig defaults; the editor needs them before a run) --------
   const ARENA = { half_x: 50, half_y: 30, goal_x: 45 };
+  const FLASH_TICKS = 18; // how long an event ring lingers (ticks)
   const teamColor = t => (t === 0 ? '#e8643c' : '#4c9be8');
   const roleAbbr = r => ({ balanced:'BAL', dangler:'DAN', playmaker:'PLY', stay_at_home:'STA',
                            sniper:'SNP', perimeter_shooter:'PER', presser:'PRS', anchor:'ANC' }[r] || r);
@@ -396,6 +397,18 @@
     vctx.fillStyle = '#ffd84a'; vctx.shadowColor = '#ffb000'; vctx.shadowBlur = 12;
     vctx.beginPath(); vctx.arc(vF.sx(fr.soul[0]), vF.sy(fr.soul[1]), 5, 0, Math.PI*2); vctx.fill();
     vctx.shadowBlur = 0;
+    // Event flashes: an expanding ring at a recent turnover or goal.
+    for (const e of MATCH.events) {
+      const age = fr.tick - e.tick;
+      if (age < 0 || age > FLASH_TICKS) continue;
+      if (e.kind !== 'goal' && e.kind !== 'turnover') continue;
+      const u = age / FLASH_TICKS;
+      vctx.globalAlpha = (1 - u) * 0.75;
+      vctx.strokeStyle = e.kind === 'goal' ? '#ffd84a' : '#e8643c';
+      vctx.lineWidth = 3;
+      vctx.beginPath(); vctx.arc(vF.sx(e.pos[0]), vF.sy(e.pos[1]), 6 + 22 * u, 0, Math.PI*2); vctx.stroke();
+    }
+    vctx.globalAlpha = 1;
     if (fr.scored !== undefined) {
       vctx.fillStyle = teamColor(fr.scored); vctx.globalAlpha = 0.15;
       vctx.fillRect(0, 0, vc.width, vc.height); vctx.globalAlpha = 1;
