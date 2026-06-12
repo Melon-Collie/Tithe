@@ -18,12 +18,12 @@ pub fn run(args: &[String]) {
     let names: Vec<String> = sim.agents().iter().map(|a| a.name.clone()).collect();
 
     println!("== Tithe match log (seed {seed}) ==");
-    println!("roster (attack/defend role, Acc/Rng/Hand/Strip/Cont/Pass 0–99):");
+    println!("roster (attack/defend role, Acc/Rng/Hand/Strip/Cont/Pass/Pos 0–99):");
     for a in sim.agents() {
         let at = &a.attributes;
         let pct = |f: tithe_sim::Fx| (f * tithe_sim::Fx::from_num(100)).to_num::<u32>();
         println!(
-            "  {:<8} team{} {:<9}/{:<8} A{:>2} R{:>2} H{:>2} S{:>2} C{:>2} P{:>2}",
+            "  {:<8} team{} {:<9}/{:<8} A{:>2} R{:>2} H{:>2} S{:>2} C{:>2} P{:>2} Po{:>2}",
             a.name,
             a.team,
             attack_label(a.attack_role),
@@ -34,6 +34,7 @@ pub fn run(args: &[String]) {
             pct(at.stripping),
             pct(at.contesting),
             pct(at.passing),
+            pct(at.positioning),
         );
     }
     println!();

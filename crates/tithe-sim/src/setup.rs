@@ -8,8 +8,8 @@
 //! - a **library of named formations** (positioning templates); each team picks
 //!   two — an `attack_formation` (in-possession) and a `defend_formation`
 //!   (out-of-possession), so its shape morphs by phase (§1);
-//! - per team, a **roster** of players, each with a [`Role`] (the casting) and
-//!   the four attributes;
+//! - per team, a **roster** of players, each with two roles (in/out-of-possession
+//!   casting) and the attribute set;
 //! - the **assignment** is positional: the *n*-th player fills the *n*-th slot
 //!   of *both* of that team's shapes.
 //!
@@ -81,6 +81,7 @@ pub struct PlayerSetup {
     pub stripping: u8,
     pub contesting: u8,
     pub passing: u8,
+    pub positioning: u8,
 }
 
 impl PlayerSetup {
@@ -104,6 +105,7 @@ impl PlayerSetup {
             stripping: one("stripping", self.stripping)?,
             contesting: one("contesting", self.contesting)?,
             passing: one("passing", self.passing)?,
+            positioning: one("positioning", self.positioning)?,
         })
     }
 }
@@ -298,32 +300,97 @@ impl MatchSetup {
                 example_team(
                     "Embers",
                     &[
-                        // (name, attack_role, defend_role,
-                        //  [accuracy, range, handling, stripping, contesting, passing])
-                        ("Vale", IP::StayAtHome, OP::Anchor, [20, 20, 35, 70, 65, 45]),
-                        ("Crane", IP::Dangler, OP::Balanced, [45, 45, 50, 50, 50, 55]),
-                        ("Ash", IP::Playmaker, OP::Balanced, [40, 35, 65, 35, 55, 80]),
-                        ("Rook", IP::Balanced, OP::Balanced, [50, 45, 50, 55, 50, 50]),
-                        ("Pyre", IP::Balanced, OP::Presser, [50, 35, 40, 65, 60, 35]),
-                        ("Sear", IP::Sniper, OP::Balanced, [85, 30, 55, 30, 40, 50]), // interior
-                        ("Knell", IP::Balanced, OP::Presser, [45, 40, 40, 60, 65, 40]),
+                        // (name, attack_role, defend_role, [accuracy, range,
+                        //  handling, stripping, contesting, passing, positioning])
+                        (
+                            "Vale",
+                            IP::StayAtHome,
+                            OP::Anchor,
+                            [20, 20, 35, 70, 65, 45, 75],
+                        ),
+                        (
+                            "Crane",
+                            IP::Dangler,
+                            OP::Balanced,
+                            [45, 45, 50, 50, 50, 55, 50],
+                        ),
+                        (
+                            "Ash",
+                            IP::Playmaker,
+                            OP::Balanced,
+                            [40, 35, 65, 35, 55, 80, 60],
+                        ),
+                        (
+                            "Rook",
+                            IP::Balanced,
+                            OP::Balanced,
+                            [50, 45, 50, 55, 50, 50, 50],
+                        ),
+                        (
+                            "Pyre",
+                            IP::Balanced,
+                            OP::Presser,
+                            [50, 35, 40, 65, 60, 35, 45],
+                        ),
+                        (
+                            "Sear",
+                            IP::Sniper,
+                            OP::Balanced,
+                            [85, 30, 55, 30, 40, 50, 55],
+                        ), // interior
+                        (
+                            "Knell",
+                            IP::Balanced,
+                            OP::Presser,
+                            [45, 40, 40, 60, 65, 40, 40],
+                        ),
                     ],
                 ),
                 example_team(
                     "Wardens",
                     &[
-                        ("Holt", IP::StayAtHome, OP::Anchor, [25, 25, 35, 75, 60, 40]),
-                        ("Bram", IP::Dangler, OP::Balanced, [50, 45, 50, 50, 50, 55]),
-                        ("Fen", IP::Playmaker, OP::Balanced, [45, 40, 70, 40, 50, 75]),
-                        ("Cole", IP::Balanced, OP::Balanced, [50, 50, 50, 50, 55, 50]),
-                        ("Dane", IP::Balanced, OP::Presser, [50, 35, 40, 60, 65, 35]),
+                        (
+                            "Holt",
+                            IP::StayAtHome,
+                            OP::Anchor,
+                            [25, 25, 35, 75, 60, 40, 80],
+                        ),
+                        (
+                            "Bram",
+                            IP::Dangler,
+                            OP::Balanced,
+                            [50, 45, 50, 50, 50, 55, 45],
+                        ),
+                        (
+                            "Fen",
+                            IP::Playmaker,
+                            OP::Balanced,
+                            [45, 40, 70, 40, 50, 75, 60],
+                        ),
+                        (
+                            "Cole",
+                            IP::Balanced,
+                            OP::Balanced,
+                            [50, 50, 50, 50, 55, 50, 50],
+                        ),
+                        (
+                            "Dane",
+                            IP::Balanced,
+                            OP::Presser,
+                            [50, 35, 40, 60, 65, 35, 45],
+                        ),
                         (
                             "Gar",
                             IP::PerimeterShooter,
                             OP::Balanced,
-                            [55, 85, 55, 35, 45, 55],
+                            [55, 85, 55, 35, 45, 55, 35],
                         ), // perimeter
-                        ("Ward", IP::Balanced, OP::Presser, [45, 40, 40, 65, 60, 45]),
+                        (
+                            "Ward",
+                            IP::Balanced,
+                            OP::Presser,
+                            [45, 40, 40, 65, 60, 45, 40],
+                        ),
                     ],
                 ),
             ],
@@ -337,7 +404,7 @@ impl MatchSetup {
 /// `high-push` / `low-block` phase shapes.
 fn example_team(
     name: &str,
-    players: &[(&str, InPossessionRole, OutOfPossessionRole, [u8; 6])],
+    players: &[(&str, InPossessionRole, OutOfPossessionRole, [u8; 7])],
 ) -> TeamSetup {
     TeamSetup {
         name: name.to_string(),
@@ -350,7 +417,7 @@ fn example_team(
                     pname,
                     attack_role,
                     defend_role,
-                    [accuracy, range, handling, stripping, contesting, passing],
+                    [accuracy, range, handling, stripping, contesting, passing, positioning],
                 )| {
                     PlayerSetup {
                         name: (*pname).to_string(),
@@ -362,6 +429,7 @@ fn example_team(
                         stripping: *stripping,
                         contesting: *contesting,
                         passing: *passing,
+                        positioning: *positioning,
                     }
                 },
             )

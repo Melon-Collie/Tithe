@@ -106,6 +106,9 @@ pub struct SimConfig {
     /// How far an off-ball agent may shade off its anchor toward the play
     /// (bounded drift / elasticity — the shape breathes but never dissolves).
     pub drift_radius: Fx,
+    /// Max positional noise added to a Positioning-0 player's anchor each window
+    /// (scales with `1 − positioning`; a disciplined player adds ~none).
+    pub positioning_noise_max: Fx,
     /// Agents closer than this push apart (kept below strip_radius so it never
     /// blocks a legitimate contest).
     pub separation_radius: Fx,
@@ -174,6 +177,7 @@ impl Default for SimConfig {
             stamina_drain_per_unit: Fx::from_num(25) / Fx::from_num(10000), // 0.0025
             stamina_speed_floor: Fx::from_num(55) / Fx::from_num(100), // 0.55
             drift_radius: Fx::from_num(10),
+            positioning_noise_max: Fx::from_num(8), // Positioning 0.5 ⇒ ±4 of drift
             separation_radius: Fx::from_num(5) / Fx::from_num(2), // 2.5 (< strip_radius 3)
             separation_step: Fx::from_num(1),
             // The role-tuning table. Each row weights an in-possession role's
@@ -260,7 +264,8 @@ impl Formation {
 /// → resists a strip (the carrier's side of the strip contest); `stripping`
 /// → strip-the-carrier success (the defender's side); `contesting` → pass
 /// interception + offering contest (and the lane area a defender covers);
-/// `passing` → pass completion. All in `[0, 1]`.
+/// `passing` → pass completion; `positioning` → anchor discipline (a low score
+/// adds noise to where the player thinks his spot is). All in `[0, 1]`.
 #[derive(Debug, Clone, Copy)]
 pub struct Attributes {
     /// Point-blank shot conversion quality (the high-Accuracy interior finisher).
@@ -276,6 +281,11 @@ pub struct Attributes {
     /// Raises a passer's completion chance — better passers complete more, so
     /// the expected-value decision has them pass more often.
     pub passing: Fx,
+    /// Anchor discipline — how faithfully the player holds his assigned spot. A
+    /// low score adds positional noise to his working anchor each window (he
+    /// drifts off his mark); a high score sits dead on it. Distinct from the
+    /// role's intentional drift.
+    pub positioning: Fx,
 }
 
 impl Attributes {
@@ -290,6 +300,7 @@ impl Attributes {
             stripping: mid,
             contesting: mid,
             passing: mid,
+            positioning: mid,
         }
     }
 
@@ -305,6 +316,7 @@ impl Attributes {
             stripping: draw_attribute(rng),
             contesting: draw_attribute(rng),
             passing: draw_attribute(rng),
+            positioning: draw_attribute(rng),
         }
     }
 }

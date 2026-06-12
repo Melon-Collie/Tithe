@@ -135,7 +135,7 @@
         name: team.name,
         players: team.players.map((p, i) => ({
           name: p.name, attackRole: p.attack_role, defendRole: p.defend_role,
-          acc: p.accuracy, rng: p.range, hand: p.handling, strip: p.stripping, cont: p.contesting, pass: p.passing,
+          acc: p.accuracy, rng: p.range, hand: p.handling, strip: p.stripping, cont: p.contesting, pass: p.passing, pos: p.positioning,
           attack: mir(A[i]), defend: mir(D[i]),
         })),
       };
@@ -163,7 +163,7 @@
   const ATTACK_ROLES = [['balanced','Balanced'],['dangler','Dangler'],['playmaker','Playmaker'],
                         ['stay_at_home','Stay-home'],['sniper','Sniper'],['perimeter_shooter','Perimeter']];
   const DEFEND_ROLES = [['balanced','Balanced'],['presser','Presser'],['anchor','Anchor']];
-  const ATTRS = [['acc','A'],['rng','R'],['hand','H'],['strip','S'],['cont','C'],['pass','P']];
+  const ATTRS = [['acc','A'],['rng','R'],['hand','H'],['strip','S'],['cont','C'],['pass','P'],['pos','Po']];
 
   function selectHtml(field, options, current, t, i) {
     const opts = options.map(([v, label]) =>
@@ -262,7 +262,7 @@
         defend_formation: dn,
         players: team.players.map(p => ({
           name: p.name, attack_role: p.attackRole, defend_role: p.defendRole,
-          accuracy: p.acc, range: p.rng, handling: p.hand, stripping: p.strip, contesting: p.cont, passing: p.pass,
+          accuracy: p.acc, range: p.rng, handling: p.hand, stripping: p.strip, contesting: p.cont, passing: p.pass, positioning: p.pos,
         })),
       };
     });

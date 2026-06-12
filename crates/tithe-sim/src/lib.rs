@@ -215,6 +215,7 @@ impl Simulation {
     /// Off-ball agents shade by the value field (see `decide::off_ball_target`);
     /// active-pursuit intents map straight to their target.
     fn run_decisions(&mut self) {
+        let one = Fx::from_num(1);
         let carrier = self.carrier_info();
         let mut team_pos: [Vec<Vec2>; 2] = [Vec::new(), Vec::new()];
         for agent in &self.agents {
@@ -229,6 +230,17 @@ impl Simulation {
             // the decision boundary, never mid-motion.
             let in_possession = carrier.is_some_and(|c| c.team == self.agents[i].team);
             self.agents[i].apply_phase(in_possession);
+
+            // Anchor discipline: a low-Positioning player works off a noisy
+            // anchor (he can't hold his exact spot), re-erring each window. The
+            // noise is seeded, so it stays deterministic.
+            let slack =
+                self.config.positioning_noise_max * (one - self.agents[i].attributes.positioning);
+            let noise = Vec2::new(
+                self.rng_signed_unit() * slack,
+                self.rng_signed_unit() * slack,
+            );
+            self.agents[i].anchor = self.agents[i].anchor + noise;
 
             let is_nearest = nearest[self.agents[i].team as usize] == Some(self.agents[i].id);
             let intent = decide::choose_intent(
@@ -323,6 +335,13 @@ impl Simulation {
                 success: false,
             });
         }
+    }
+
+    /// A seeded random scalar in `[-1, 1]` (0.001 steps) — the building block for
+    /// positional noise. Trig-free and deterministic.
+    fn rng_signed_unit(&mut self) -> Fx {
+        let r = self.rng.below(2001) as i64 - 1000; // [-1000, 1000]
+        Fx::from_num(r) / Fx::from_num(1000)
     }
 
     /// The id of the agent nearest the soul (loose or carried) on each team.
