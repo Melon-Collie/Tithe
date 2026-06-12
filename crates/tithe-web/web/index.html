@@ -26,7 +26,13 @@
     .board h2 { font-size: 14px; margin: 0; }
     .roster { font-size: 11px; }
     .roster table { border-collapse: collapse; width: 100%; }
-    .roster td { padding: 1px 5px; }
+    .roster td { padding: 1px 2px; }
+    .roster th { color: #777; font-weight: normal; font-size: 10px; padding: 0 2px; }
+    .roster input, .roster select { background: #222; color: #ddd; border: 1px solid #444;
+                                    border-radius: 3px; font: 11px system-ui; padding: 1px; }
+    .rname { width: 60px; }
+    .rsel { width: 78px; }
+    .rnum { width: 30px; text-align: center; }
     .hint { color: #777; font-size: 12px; }
     .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; }
     #viewer-section { display: none; flex-direction: column; align-items: center; gap: 8px; margin-top: 6px; }
@@ -135,7 +141,7 @@
       };
     });
     drawAll();
-    drawRosters();
+    buildRosters();
   }
 
   function drawBoard(b) {
@@ -153,15 +159,55 @@
   }
   function drawAll() { boards.forEach(drawBoard); }
 
-  function drawRosters() {
+  // ---- editable roster -------------------------------------------------------
+  const ATTACK_ROLES = [['balanced','Balanced'],['dangler','Dangler'],['playmaker','Playmaker'],
+                        ['stay_at_home','Stay-home'],['sniper','Sniper'],['perimeter_shooter','Perimeter']];
+  const DEFEND_ROLES = [['balanced','Balanced'],['presser','Presser'],['anchor','Anchor']];
+  const ATTRS = [['acc','A'],['rng','R'],['hand','H'],['strip','S'],['cont','C'],['pass','P']];
+
+  function selectHtml(field, options, current, t, i) {
+    const opts = options.map(([v, label]) =>
+      `<option value="${v}"${v === current ? ' selected' : ''}>${label}</option>`).join('');
+    return `<select class="rsel" data-t="${t}" data-i="${i}" data-f="${field}">${opts}</select>`;
+  }
+
+  // Build the editable roster tables once; edits mutate the model in place (no
+  // re-render, so inputs keep focus) and redraw the board labels.
+  function buildRosters() {
     editTeams.forEach((team, t) => {
-      const rows = team.players.map(p =>
-        `<tr><td><span class="dot" style="background:${teamColor(t)}"></span></td>` +
-        `<td>${p.name}</td><td class="hint">${roleAbbr(p.attackRole)}/${roleAbbr(p.defendRole)}</td>` +
-        `<td class="hint">A${p.acc} R${p.rng} H${p.hand} S${p.strip} C${p.cont} P${p.pass}</td></tr>`).join('');
-      document.getElementById('roster' + t).innerHTML = `<table>${rows}</table>`;
+      const head = `<tr><th></th><th>name</th><th>att</th><th>def</th>` +
+        ATTRS.map(([, l]) => `<th>${l}</th>`).join('') + `</tr>`;
+      const rows = team.players.map((p, i) => {
+        const dot = `<span class="dot" style="background:${teamColor(t)}"></span>`;
+        const name = `<input class="rname" type="text" value="${p.name}" data-t="${t}" data-i="${i}" data-f="name">`;
+        const att = selectHtml('attackRole', ATTACK_ROLES, p.attackRole, t, i);
+        const def = selectHtml('defendRole', DEFEND_ROLES, p.defendRole, t, i);
+        const nums = ATTRS.map(([f]) =>
+          `<td><input class="rnum" type="number" min="0" max="100" value="${p[f]}" data-t="${t}" data-i="${i}" data-f="${f}"></td>`).join('');
+        return `<tr><td>${dot}</td><td>${name}</td><td>${att}</td><td>${def}</td>${nums}</tr>`;
+      }).join('');
+      document.getElementById('roster' + t).innerHTML = `<table>${head}${rows}</table>`;
     });
   }
+
+  // Delegated handler: a roster edit updates the player model + the board label.
+  function onRosterEdit(e) {
+    const el = e.target;
+    const { t, i, f } = el.dataset;
+    if (t === undefined || f === undefined) return;
+    const p = editTeams[+t].players[+i];
+    if (el.classList.contains('rnum')) {
+      p[f] = Math.max(0, Math.min(100, parseInt(el.value, 10) || 0));
+    } else {
+      p[f] = el.value;
+    }
+    drawBoard(boards[+t]);
+  }
+  ['roster0', 'roster1'].forEach(id => {
+    const c = document.getElementById(id);
+    c.addEventListener('input', onRosterEdit);
+    c.addEventListener('change', onRosterEdit);
+  });
 
   // ---- tabs ------------------------------------------------------------------
   function setPhase(p) {
