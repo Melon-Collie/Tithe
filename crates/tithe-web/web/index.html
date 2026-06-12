@@ -397,16 +397,21 @@
     vctx.fillStyle = '#ffd84a'; vctx.shadowColor = '#ffb000'; vctx.shadowBlur = 12;
     vctx.beginPath(); vctx.arc(vF.sx(fr.soul[0]), vF.sy(fr.soul[1]), 5, 0, Math.PI*2); vctx.fill();
     vctx.shadowBlur = 0;
-    // Event flashes: an expanding ring at a recent turnover or goal.
+    // Event flashes: an expanding ring at a recent goal / turnover / missed shot.
+    const FLASH_COLOR = { goal: '#ffd84a', turnover: '#e8643c', shot: '#88a0b0' };
     for (const e of MATCH.events) {
+      const color = FLASH_COLOR[e.kind];
+      if (!color) continue;
       const age = fr.tick - e.tick;
       if (age < 0 || age > FLASH_TICKS) continue;
-      if (e.kind !== 'goal' && e.kind !== 'turnover') continue;
       const u = age / FLASH_TICKS;
-      vctx.globalAlpha = (1 - u) * 0.75;
-      vctx.strokeStyle = e.kind === 'goal' ? '#ffd84a' : '#e8643c';
-      vctx.lineWidth = 3;
-      vctx.beginPath(); vctx.arc(vF.sx(e.pos[0]), vF.sy(e.pos[1]), 6 + 22 * u, 0, Math.PI*2); vctx.stroke();
+      // A miss is less dramatic than a turnover/goal — dimmer, smaller.
+      const peak = e.kind === 'shot' ? 0.45 : 0.75;
+      const grow = e.kind === 'shot' ? 14 : 22;
+      vctx.globalAlpha = (1 - u) * peak;
+      vctx.strokeStyle = color;
+      vctx.lineWidth = e.kind === 'shot' ? 2 : 3;
+      vctx.beginPath(); vctx.arc(vF.sx(e.pos[0]), vF.sy(e.pos[1]), 6 + grow * u, 0, Math.PI*2); vctx.stroke();
     }
     vctx.globalAlpha = 1;
     if (fr.scored !== undefined) {

@@ -211,13 +211,17 @@ fn build_export(
         for ev in &events {
             if let Some((kind, text)) = narrate(ev, &names) {
                 // Where to flash: the goal on a score (the soul has already reset
-                // to center by now), the ball's spot otherwise.
+                // to center by now), the shooter's spot on a miss (where he took
+                // it — telling for perimeter bombs), the ball's spot otherwise.
                 let pos = match ev {
                     Event::OfferingResolved {
                         carrier,
                         scored: true,
                         ..
                     } => xy(goals[sim.agents()[*carrier as usize].team as usize]),
+                    Event::OfferingResolved { carrier, .. } => {
+                        xy(sim.agents()[*carrier as usize].pos)
+                    }
                     _ => xy(sim.soul().pos),
                 };
                 narrated.push(MatchEvent {
