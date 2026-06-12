@@ -82,6 +82,7 @@ pub struct PlayerSetup {
     pub contesting: u8,
     pub passing: u8,
     pub positioning: u8,
+    pub pace: u8,
 }
 
 impl PlayerSetup {
@@ -106,6 +107,7 @@ impl PlayerSetup {
             contesting: one("contesting", self.contesting)?,
             passing: one("passing", self.passing)?,
             positioning: one("positioning", self.positioning)?,
+            pace: one("pace", self.pace)?,
         })
     }
 }
@@ -297,52 +299,52 @@ impl MatchSetup {
         Self {
             formations,
             teams: vec![
+                // (name, attack_role, defend_role, [accuracy, range, handling,
+                //  stripping, contesting, passing, positioning, pace])
                 example_team(
                     "Embers",
                     &[
-                        // (name, attack_role, defend_role, [accuracy, range,
-                        //  handling, stripping, contesting, passing, positioning])
                         (
                             "Vale",
                             IP::StayAtHome,
                             OP::Anchor,
-                            [20, 20, 35, 70, 65, 45, 75],
+                            [20, 20, 35, 70, 65, 45, 75, 40],
                         ),
                         (
                             "Crane",
                             IP::Dangler,
                             OP::Balanced,
-                            [45, 45, 50, 50, 50, 55, 50],
+                            [45, 45, 50, 50, 50, 55, 50, 70],
                         ),
                         (
                             "Ash",
                             IP::Playmaker,
                             OP::Balanced,
-                            [40, 35, 65, 35, 55, 80, 60],
+                            [40, 35, 65, 35, 55, 80, 60, 50],
                         ),
                         (
                             "Rook",
                             IP::Balanced,
                             OP::Balanced,
-                            [50, 45, 50, 55, 50, 50, 50],
+                            [50, 45, 50, 55, 50, 50, 50, 55],
                         ),
                         (
                             "Pyre",
                             IP::Balanced,
                             OP::Presser,
-                            [50, 35, 40, 65, 60, 35, 45],
+                            [50, 35, 40, 65, 60, 35, 45, 75],
                         ),
                         (
                             "Sear",
                             IP::Sniper,
                             OP::Balanced,
-                            [85, 30, 55, 30, 40, 50, 55],
-                        ), // interior
+                            [85, 30, 55, 30, 40, 50, 55, 60],
+                        ),
                         (
                             "Knell",
                             IP::Balanced,
                             OP::Presser,
-                            [45, 40, 40, 60, 65, 40, 40],
+                            [45, 40, 40, 60, 65, 40, 40, 65],
                         ),
                     ],
                 ),
@@ -353,43 +355,43 @@ impl MatchSetup {
                             "Holt",
                             IP::StayAtHome,
                             OP::Anchor,
-                            [25, 25, 35, 75, 60, 40, 80],
+                            [25, 25, 35, 75, 60, 40, 80, 40],
                         ),
                         (
                             "Bram",
                             IP::Dangler,
                             OP::Balanced,
-                            [50, 45, 50, 50, 50, 55, 45],
+                            [50, 45, 50, 50, 50, 55, 45, 70],
                         ),
                         (
                             "Fen",
                             IP::Playmaker,
                             OP::Balanced,
-                            [45, 40, 70, 40, 50, 75, 60],
+                            [45, 40, 70, 40, 50, 75, 60, 50],
                         ),
                         (
                             "Cole",
                             IP::Balanced,
                             OP::Balanced,
-                            [50, 50, 50, 50, 55, 50, 50],
+                            [50, 50, 50, 50, 55, 50, 50, 50],
                         ),
                         (
                             "Dane",
                             IP::Balanced,
                             OP::Presser,
-                            [50, 35, 40, 60, 65, 35, 45],
+                            [50, 35, 40, 60, 65, 35, 45, 75],
                         ),
                         (
                             "Gar",
                             IP::PerimeterShooter,
                             OP::Balanced,
-                            [55, 85, 55, 35, 45, 55, 35],
-                        ), // perimeter
+                            [55, 85, 55, 35, 45, 55, 35, 45],
+                        ),
                         (
                             "Ward",
                             IP::Balanced,
                             OP::Presser,
-                            [45, 40, 40, 65, 60, 45, 40],
+                            [45, 40, 40, 65, 60, 45, 40, 65],
                         ),
                     ],
                 ),
@@ -399,12 +401,12 @@ impl MatchSetup {
 }
 
 /// Build an example team from compact `(name, attack_role, defend_role,
-/// [accuracy, range, handling, stripping, contesting, passing])` tuples — keeps
-/// [`MatchSetup::default_match`] readable. Both teams field the shared
-/// `high-push` / `low-block` phase shapes.
+/// [accuracy, range, handling, stripping, contesting, passing, positioning,
+/// pace])` tuples — keeps [`MatchSetup::default_match`] readable. Both teams
+/// field the shared `high-push` / `low-block` phase shapes.
 fn example_team(
     name: &str,
-    players: &[(&str, InPossessionRole, OutOfPossessionRole, [u8; 7])],
+    players: &[(&str, InPossessionRole, OutOfPossessionRole, [u8; 8])],
 ) -> TeamSetup {
     TeamSetup {
         name: name.to_string(),
@@ -417,7 +419,7 @@ fn example_team(
                     pname,
                     attack_role,
                     defend_role,
-                    [accuracy, range, handling, stripping, contesting, passing, positioning],
+                    [accuracy, range, handling, stripping, contesting, passing, positioning, pace],
                 )| {
                     PlayerSetup {
                         name: (*pname).to_string(),
@@ -430,6 +432,7 @@ fn example_team(
                         contesting: *contesting,
                         passing: *passing,
                         positioning: *positioning,
+                        pace: *pace,
                     }
                 },
             )

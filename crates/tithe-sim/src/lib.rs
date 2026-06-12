@@ -369,6 +369,8 @@ impl Simulation {
     fn advance_motion(&mut self) {
         let max_speed = self.config.max_speed;
         let floor = self.config.stamina_speed_floor;
+        let pace_floor = self.config.pace_floor;
+        let pace_span = self.config.pace_ceil - self.config.pace_floor;
         let drain_base = self.config.stamina_drain_base;
         let drain_per_unit = self.config.stamina_drain_per_unit;
         let one = Fx::from_num(1);
@@ -378,7 +380,10 @@ impl Simulation {
             if self.agents[i].stagger > 0 {
                 self.agents[i].stagger -= 1;
             } else {
-                let speed = max_speed * (floor + (one - floor) * self.agents[i].stamina);
+                // Top speed = Pace multiplier × stamina multiplier × base.
+                let pace_mult = pace_floor + pace_span * self.agents[i].attributes.pace;
+                let stamina_mult = floor + (one - floor) * self.agents[i].stamina;
+                let speed = max_speed * pace_mult * stamina_mult;
                 let from = self.agents[i].pos;
                 let to = world::step_toward(from, self.agents[i].target, speed);
                 self.agents[i].pos = to;

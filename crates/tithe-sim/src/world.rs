@@ -103,6 +103,10 @@ pub struct SimConfig {
     pub stamina_drain_per_unit: Fx,
     /// Speed multiplier at empty stamina (full stamina = 1.0). Gassed = slower.
     pub stamina_speed_floor: Fx,
+    /// Speed multiplier at Pace 0 and Pace 1 — a player's top speed is
+    /// interpolated between these (Pace 0.5 ≈ the average 1.0).
+    pub pace_floor: Fx,
+    pub pace_ceil: Fx,
     /// How far an off-ball agent may shade off its anchor toward the play
     /// (bounded drift / elasticity — the shape breathes but never dissolves).
     pub drift_radius: Fx,
@@ -176,6 +180,8 @@ impl Default for SimConfig {
             stamina_drain_base: Fx::from_num(5) / Fx::from_num(10000), // 0.0005
             stamina_drain_per_unit: Fx::from_num(25) / Fx::from_num(10000), // 0.0025
             stamina_speed_floor: Fx::from_num(55) / Fx::from_num(100), // 0.55
+            pace_floor: Fx::from_num(75) / Fx::from_num(100),          // 0.75 (Pace 0)
+            pace_ceil: Fx::from_num(125) / Fx::from_num(100),          // 1.25 (Pace 1)
             drift_radius: Fx::from_num(10),
             positioning_noise_max: Fx::from_num(8), // Positioning 0.5 ⇒ ±4 of drift
             separation_radius: Fx::from_num(5) / Fx::from_num(2), // 2.5 (< strip_radius 3)
@@ -286,6 +292,10 @@ pub struct Attributes {
     /// drifts off his mark); a high score sits dead on it. Distinct from the
     /// role's intentional drift.
     pub positioning: Fx,
+    /// Top speed — scales how fast the player moves (the burner reaches the soul
+    /// first and closes down harder). Maps to a speed multiplier between
+    /// `pace_floor` and `pace_ceil`.
+    pub pace: Fx,
 }
 
 impl Attributes {
@@ -301,6 +311,7 @@ impl Attributes {
             contesting: mid,
             passing: mid,
             positioning: mid,
+            pace: mid,
         }
     }
 
@@ -317,6 +328,7 @@ impl Attributes {
             contesting: draw_attribute(rng),
             passing: draw_attribute(rng),
             positioning: draw_attribute(rng),
+            pace: draw_attribute(rng),
         }
     }
 }
