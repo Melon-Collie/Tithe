@@ -171,6 +171,7 @@ fn build_export(
     let goals = sim.config().goals();
 
     let names: Vec<String> = sim.agents().iter().map(|a| a.name.clone()).collect();
+    let agent_teams: Vec<u8> = sim.agents().iter().map(|a| a.team).collect();
     let mut agents = Vec::new();
     let mut numbers = [0u32, 0u32]; // per-team jersey counters
     for a in sim.agents() {
@@ -199,6 +200,7 @@ fn build_export(
 
     let mut frames = Vec::new();
     let mut narrated: Vec<MatchEvent> = Vec::new();
+    let mut soul_no = 0u32;
     let mut ticks = 0;
     while sim.winner().is_none() && ticks < max_ticks {
         let events = sim.tick();
@@ -209,7 +211,18 @@ fn build_export(
             _ => None,
         });
         for ev in &events {
-            if let Some((kind, text)) = narrate(ev, &names) {
+            // A new soul (opening kickoff or after a bank) numbers the round.
+            if matches!(ev, Event::NewSoul) {
+                soul_no += 1;
+                narrated.push(MatchEvent {
+                    tick,
+                    kind: "soul",
+                    text: format!("Soul {soul_no} begins"),
+                    pos: xy(sim.soul().pos),
+                });
+                continue;
+            }
+            if let Some((kind, text)) = narrate(ev, &names, &agent_teams) {
                 // Where to flash: the goal on a score (the soul has already reset
                 // to center by now), the shooter's spot on a miss (where he took
                 // it — telling for perimeter bombs), the ball's spot otherwise.
@@ -264,25 +277,35 @@ fn build_export(
     })
 }
 
-/// The name for an agent id, for the play-by-play.
-fn who(names: &[String], id: u32) -> &str {
-    names.get(id as usize).map_or("?", String::as_str)
+/// The team accent colour, for tinting names in the play-by-play.
+fn team_color(team: u8) -> &'static str {
+    if team == 0 {
+        "#e8643c"
+    } else {
+        "#4c9be8"
+    }
+}
+
+/// A player's name wrapped in a team-coloured span (the ticker renders it as
+/// HTML); inline colour so it beats the line's kind colour.
+fn who(names: &[String], teams: &[u8], id: u32) -> String {
+    let name = names.get(id as usize).map_or("?", String::as_str);
+    let team = teams.get(id as usize).copied().unwrap_or(0);
+    format!("<span style=\"color:{}\">{name}</span>", team_color(team))
 }
 
 /// Narrate a notable event for the play-by-play ticker — `(kind, text)`, or
 /// `None` for the per-tick noise (positions, routine pickups, whiffed strips).
-fn narrate(event: &Event, names: &[String]) -> Option<(&'static str, String)> {
+/// `NewSoul` is handled by the caller (it numbers the round).
+fn narrate(event: &Event, names: &[String], teams: &[u8]) -> Option<(&'static str, String)> {
+    let who = |id| who(names, teams, id);
     match event {
-        Event::NewSoul => Some(("soul", "──── new soul ────".to_string())),
-        Event::SoulClaimed { agent } => {
-            Some(("info", format!("{} gathers it", who(names, *agent))))
+        Event::SoulClaimed { agent } => Some(("info", format!("{} gathers it", who(*agent)))),
+        Event::PassMade { from, to, chance } => {
+            Some(("pass", format!("{} → {} ({chance}%)", who(*from), who(*to))))
         }
-        Event::PassMade { from, to, chance } => Some((
-            "pass",
-            format!("{} → {} ({chance}%)", who(names, *from), who(names, *to)),
-        )),
         Event::PassIntercepted { by } => {
-            Some(("turnover", format!("↳ intercepted by {}!", who(names, *by))))
+            Some(("turnover", format!("↳ intercepted by {}!", who(*by))))
         }
         Event::StripAttempt {
             defender,
@@ -291,25 +314,18 @@ fn narrate(event: &Event, names: &[String]) -> Option<(&'static str, String)> {
             success: true,
         } => Some((
             "turnover",
-            format!(
-                "{} strips {} ({chance}%)",
-                who(names, *defender),
-                who(names, *carrier)
-            ),
+            format!("{} strips {} ({chance}%)", who(*defender), who(*carrier)),
         )),
         Event::OfferingResolved {
             carrier,
             chance,
             scored,
         } => Some(if *scored {
-            (
-                "goal",
-                format!("⚑ {} SCORES ({chance}%)", who(names, *carrier)),
-            )
+            ("goal", format!("⚑ {} SCORES ({chance}%)", who(*carrier)))
         } else {
             (
                 "shot",
-                format!("{} offers ({chance}%) — no good", who(names, *carrier)),
+                format!("{} offers ({chance}%) — no good", who(*carrier)),
             )
         }),
         Event::MatchOver { winner } => Some(("end", format!("FINAL — team {winner} wins"))),
