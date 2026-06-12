@@ -51,6 +51,10 @@
     .ev.soul { color: #666; text-align: center; }
     .ev.info { color: #777; }
     .ev.end { color: #fff; font-weight: 700; }
+    #ptip { position: fixed; display: none; z-index: 20; pointer-events: none; white-space: nowrap;
+            background: #0d0d0d; border: 1px solid #555; border-radius: 5px; padding: 6px 9px;
+            font-size: 11px; line-height: 1.5; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
+    #ptip .tip-attrs { color: #bbb; }
   </style>
 </head>
 <body>
@@ -93,6 +97,8 @@
       <div id="ticker" class="ticker"></div>
     </div>
   </div>
+
+  <div id="ptip"></div>
 
   <script>
   // ---- arena (SimConfig defaults; the editor needs them before a run) --------
@@ -164,15 +170,19 @@
 
   function drawBoard(b) {
     drawArena(b.ctx, b.canvas, b.f);
-    editTeams[b.team].players.forEach(p => {
+    editTeams[b.team].players.forEach((p, i) => {
       const pos = p[phase];
       const px = b.f.sx(pos.x), py = b.f.sy(pos.y);
       b.ctx.fillStyle = teamColor(b.team);
-      b.ctx.beginPath(); b.ctx.arc(px, py, 7, 0, Math.PI*2); b.ctx.fill();
-      b.ctx.fillStyle = '#eee'; b.ctx.font = '10px system-ui'; b.ctx.textAlign = 'center';
-      b.ctx.fillText(p.name, px, py - 10);
+      b.ctx.beginPath(); b.ctx.arc(px, py, 8, 0, Math.PI*2); b.ctx.fill();
+      b.ctx.fillStyle = '#fff'; b.ctx.font = 'bold 9px system-ui';
+      b.ctx.textAlign = 'center'; b.ctx.textBaseline = 'middle';
+      b.ctx.fillText(i + 1, px, py + 0.5);
+      b.ctx.textBaseline = 'alphabetic';
+      b.ctx.fillStyle = '#eee'; b.ctx.font = '10px system-ui';
+      b.ctx.fillText(p.name, px, py - 11);
       b.ctx.fillStyle = '#888'; b.ctx.font = '8px system-ui';
-      b.ctx.fillText(roleAbbr(phase === 'attack' ? p.attackRole : p.defendRole), px, py + 15);
+      b.ctx.fillText(roleAbbr(phase === 'attack' ? p.attackRole : p.defendRole), px, py + 16);
     });
   }
   function drawAll() { boards.forEach(drawBoard); }
@@ -193,16 +203,16 @@
   // re-render, so inputs keep focus) and redraw the board labels.
   function buildRosters() {
     editTeams.forEach((team, t) => {
-      const head = `<tr><th></th><th>name</th><th>att</th><th>def</th>` +
+      const head = `<tr><th>#</th><th>name</th><th>att</th><th>def</th>` +
         ATTRS.map(([, l]) => `<th>${l}</th>`).join('') + `</tr>`;
       const rows = team.players.map((p, i) => {
-        const dot = `<span class="dot" style="background:${teamColor(t)}"></span>`;
+        const num = `<span class="dot" style="background:${teamColor(t)}"></span> ${i + 1}`;
         const name = `<input class="rname" type="text" value="${p.name}" data-t="${t}" data-i="${i}" data-f="name">`;
         const att = selectHtml('attackRole', ATTACK_ROLES, p.attackRole, t, i);
         const def = selectHtml('defendRole', DEFEND_ROLES, p.defendRole, t, i);
         const nums = ATTRS.map(([f]) =>
           `<td><input class="rnum" type="number" min="0" max="100" value="${p[f]}" data-t="${t}" data-i="${i}" data-f="${f}"></td>`).join('');
-        return `<tr><td>${dot}</td><td>${name}</td><td>${att}</td><td>${def}</td>${nums}</tr>`;
+        return `<tr><td class="hint">${num}</td><td>${name}</td><td>${att}</td><td>${def}</td>${nums}</tr>`;
       }).join('');
       document.getElementById('roster' + t).innerHTML = `<table>${head}${rows}</table>`;
     });
@@ -369,16 +379,19 @@
     for (let i = 0; i < fr.agents.length; i++) {
       const a = fr.agents[i], m = meta[i];
       const X = vF.sx(a.x), Y = vF.sy(a.y);
-      vctx.globalAlpha = a.stagger ? 0.25 : 0.45 + 0.55 * (a.stamina ?? 1);
+      vctx.globalAlpha = a.stagger ? 0.3 : 0.5 + 0.5 * (a.stamina ?? 1);
       vctx.fillStyle = teamColor(m.team);
-      vctx.beginPath(); vctx.arc(X, Y, 7, 0, Math.PI*2); vctx.fill();
+      vctx.beginPath(); vctx.arc(X, Y, 9, 0, Math.PI*2); vctx.fill();
       if (fr.carrier === m.id) {
         vctx.globalAlpha = 1; vctx.strokeStyle = '#ffd84a'; vctx.lineWidth = 2.5;
-        vctx.beginPath(); vctx.arc(X, Y, 11, 0, Math.PI*2); vctx.stroke();
+        vctx.beginPath(); vctx.arc(X, Y, 12, 0, Math.PI*2); vctx.stroke();
       }
-      vctx.globalAlpha = 1; vctx.fillStyle = '#cfcfcf'; vctx.font = '10px system-ui'; vctx.textAlign = 'center';
-      vctx.fillText(m.name, X, Y - 11);
+      // Jersey number in the dot — identify a player at a glance.
+      vctx.globalAlpha = 1; vctx.fillStyle = '#fff'; vctx.font = 'bold 10px system-ui';
+      vctx.textAlign = 'center'; vctx.textBaseline = 'middle';
+      vctx.fillText(m.number, X, Y + 0.5);
     }
+    vctx.textBaseline = 'alphabetic';
     vctx.globalAlpha = 1;
     vctx.fillStyle = '#ffd84a'; vctx.shadowColor = '#ffb000'; vctx.shadowBlur = 12;
     vctx.beginPath(); vctx.arc(vF.sx(fr.soul[0]), vF.sy(fr.soul[1]), 5, 0, Math.PI*2); vctx.fill();
@@ -413,6 +426,39 @@
   }
   playBtn.onclick = () => { if (idx >= MATCH.frames.length - 1) idx = 0; setPlaying(!playing); };
   scrub.oninput = () => { idx = Number(scrub.value); setPlaying(false); };
+
+  // ---- hover a player → roles + attributes -----------------------------------
+  const ptip = document.getElementById('ptip');
+  const ROLE_LABEL = { balanced:'Balanced', dangler:'Dangler', playmaker:'Playmaker', stay_at_home:'Stay-home',
+                       sniper:'Sniper', perimeter_shooter:'Perimeter', presser:'Presser', anchor:'Anchor' };
+  function tipHtml(m) {
+    const a = m.attrs;
+    const lbl = r => ROLE_LABEL[r] || r;
+    return `<div class="t${m.team}" style="font-weight:600">#${m.number} ${m.name}</div>` +
+      `<div class="hint">${lbl(m.attack_role)} / ${lbl(m.defend_role)}</div>` +
+      `<div class="tip-attrs">Acc ${a.acc}&ensp;Rng ${a.rng}&ensp;Han ${a.han}</div>` +
+      `<div class="tip-attrs">Str ${a.str}&ensp;Con ${a.con}&ensp;Pas ${a.pas}</div>` +
+      `<div class="tip-attrs">Pos ${a.pos}&ensp;Pace ${a.pace}&ensp;Awr ${a.awr}</div>`;
+  }
+  vc.addEventListener('mousemove', e => {
+    if (!MATCH) { ptip.style.display = 'none'; return; }
+    const r = vc.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const fr = MATCH.frames[idx];
+    let hit = -1, best = 13 * 13;
+    for (let i = 0; i < fr.agents.length; i++) {
+      const dx = vF.sx(fr.agents[i].x) - mx, dy = vF.sy(fr.agents[i].y) - my;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < best) { best = d2; hit = i; }
+    }
+    if (hit >= 0) {
+      ptip.innerHTML = tipHtml(MATCH.agents[hit]);
+      ptip.style.display = 'block';
+      ptip.style.left = (e.clientX + 14) + 'px';
+      ptip.style.top = (e.clientY + 12) + 'px';
+    } else { ptip.style.display = 'none'; }
+  });
+  vc.addEventListener('mouseleave', () => { ptip.style.display = 'none'; });
 
   loadDefault();
   requestAnimationFrame(loop);

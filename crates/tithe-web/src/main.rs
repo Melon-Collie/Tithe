@@ -100,10 +100,26 @@ struct Arena {
 #[derive(Serialize)]
 struct AgentMeta {
     id: u32,
+    number: u32,
     name: String,
     team: u8,
     attack_role: InPossessionRole,
     defend_role: OutOfPossessionRole,
+    attrs: AgentAttrs,
+}
+
+/// A player's attributes as 0..=100 percentiles, for the viewer's hover panel.
+#[derive(Serialize)]
+struct AgentAttrs {
+    acc: u32,
+    rng: u32,
+    han: u32,
+    str: u32,
+    con: u32,
+    pas: u32,
+    pos: u32,
+    pace: u32,
+    awr: u32,
 }
 
 #[derive(Serialize)]
@@ -129,6 +145,11 @@ fn xy(p: Vec2) -> [f32; 2] {
     [p.x.to_num::<f32>(), p.y.to_num::<f32>()]
 }
 
+/// A fixed-point attribute as a 0..=100 percentile (render boundary).
+fn pct(f: tithe_sim::Fx) -> u32 {
+    (f * tithe_sim::Fx::from_num(100)).to_num()
+}
+
 /// Build the playback export by running the authored matchup to a winner (or the
 /// tick cap), snapshotting one [`Frame`] per tick.
 fn build_export(
@@ -147,17 +168,31 @@ fn build_export(
     let souls_to_win = cfg.souls_to_win;
 
     let names: Vec<String> = sim.agents().iter().map(|a| a.name.clone()).collect();
-    let agents = sim
-        .agents()
-        .iter()
-        .map(|a| AgentMeta {
+    let mut agents = Vec::new();
+    let mut numbers = [0u32, 0u32]; // per-team jersey counters
+    for a in sim.agents() {
+        numbers[a.team as usize] += 1;
+        let at = &a.attributes;
+        agents.push(AgentMeta {
             id: a.id,
+            number: numbers[a.team as usize],
             name: a.name.clone(),
             team: a.team,
             attack_role: a.attack_role,
             defend_role: a.defend_role,
-        })
-        .collect();
+            attrs: AgentAttrs {
+                acc: pct(at.accuracy),
+                rng: pct(at.range),
+                han: pct(at.handling),
+                str: pct(at.stripping),
+                con: pct(at.contesting),
+                pas: pct(at.passing),
+                pos: pct(at.positioning),
+                pace: pct(at.pace),
+                awr: pct(at.awareness),
+            },
+        });
+    }
 
     let mut frames = Vec::new();
     let mut narrated: Vec<MatchEvent> = Vec::new();
