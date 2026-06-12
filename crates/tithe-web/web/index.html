@@ -36,6 +36,21 @@
     .hint { color: #777; font-size: 12px; }
     .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; }
     #viewer-section { display: none; flex-direction: column; align-items: center; gap: 8px; margin-top: 6px; }
+    .watch { display: flex; gap: 8px; align-items: flex-start; }
+    .ticker { width: 240px; height: 432px; overflow-y: auto; background: #161616;
+              border: 1px solid #333; border-radius: 5px; font-size: 12px; padding: 3px; }
+    .ticker .ev { padding: 2px 5px; border-radius: 3px; cursor: pointer;
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ticker .ev:hover { background: #262626; }
+    .ticker .ev.cur { background: #303030; outline: 1px solid #555; }
+    .ticker .tk { color: #5a5a5a; margin-right: 4px; }
+    .ev.goal { color: var(--soul); font-weight: 600; }
+    .ev.turnover { color: var(--t0); }
+    .ev.pass { color: #9a9a9a; }
+    .ev.shot { color: #88a0b0; }
+    .ev.soul { color: #666; text-align: center; }
+    .ev.info { color: #777; }
+    .ev.end { color: #fff; font-weight: 700; }
   </style>
 </head>
 <body>
@@ -72,8 +87,11 @@
       <span id="tick"></span>
       <span id="winner" style="font-weight:700"></span>
     </div>
-    <input id="scrub" type="range" min="0" value="0" style="width: 920px" />
-    <canvas id="viewer" width="920" height="600"></canvas>
+    <input id="scrub" type="range" min="0" value="0" style="width: 968px" />
+    <div class="watch">
+      <canvas id="viewer" width="720" height="432"></canvas>
+      <div id="ticker" class="ticker"></div>
+    </div>
   </div>
 
   <script>
@@ -293,16 +311,50 @@
   const speedEl = document.getElementById('speed');
   const scrub = document.getElementById('scrub');
   const playBtn = document.getElementById('play');
+  const tickerEl = document.getElementById('ticker');
   let MATCH = null, idx = 0, playing = false, acc = 0, last = 0;
+  let tickerRows = [], curEv = -1;
 
   function startViewer(match) {
     MATCH = match;
     vSection.style.display = 'flex';
     scrub.max = match.frames.length - 1;
     idx = 0; setPlaying(true); last = performance.now();
+    buildTicker(match);
     vSection.scrollIntoView({ behavior: 'smooth' });
   }
   function setPlaying(p) { playing = p; playBtn.textContent = playing ? '⏸ Pause' : '▶ Play'; }
+
+  // ---- play-by-play ticker ---------------------------------------------------
+  function buildTicker(match) {
+    tickerEl.innerHTML = '';
+    curEv = -1;
+    tickerRows = match.events.map(e => {
+      const el = document.createElement('div');
+      el.className = 'ev ' + e.kind;
+      el.innerHTML = `<span class="tk">${e.tick}</span>${e.text}`;
+      el.onclick = () => jumpToTick(e.tick);
+      tickerEl.appendChild(el);
+      return { tick: e.tick, el };
+    });
+  }
+  function jumpToTick(tick) {
+    const frames = MATCH.frames;
+    let f = frames.length - 1;
+    for (let k = 0; k < frames.length; k++) { if (frames[k].tick >= tick) { f = k; break; } }
+    idx = f; setPlaying(false);
+  }
+  // Highlight + scroll to the latest event at or before the current frame.
+  function syncTicker() {
+    if (!MATCH || !tickerRows.length) return;
+    const tick = MATCH.frames[idx].tick;
+    let cur = -1;
+    for (let k = 0; k < tickerRows.length; k++) { if (tickerRows[k].tick <= tick) cur = k; else break; }
+    if (cur === curEv) return;
+    if (curEv >= 0) tickerRows[curEv].el.classList.remove('cur');
+    if (cur >= 0) { tickerRows[cur].el.classList.add('cur'); tickerRows[cur].el.scrollIntoView({ block: 'nearest' }); }
+    curEv = cur;
+  }
 
   function drawViewer(fr) {
     drawArena(vctx, vc, vF);
@@ -355,6 +407,7 @@
         }
       }
       drawViewer(MATCH.frames[idx]);
+      syncTicker();
     }
     requestAnimationFrame(loop);
   }

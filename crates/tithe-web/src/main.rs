@@ -77,7 +77,17 @@ struct MatchExport {
     souls_to_win: u32,
     agents: Vec<AgentMeta>,
     frames: Vec<Frame>,
+    events: Vec<MatchEvent>,
     winner: Option<u8>,
+}
+
+/// A narrated play-by-play line, tagged with its tick (for syncing to playback)
+/// and a `kind` (for the viewer to colour it).
+#[derive(Serialize)]
+struct MatchEvent {
+    tick: u64,
+    kind: &'static str,
+    text: String,
 }
 
 #[derive(Serialize)]
@@ -136,6 +146,7 @@ fn build_export(
     };
     let souls_to_win = cfg.souls_to_win;
 
+    let names: Vec<String> = sim.agents().iter().map(|a| a.name.clone()).collect();
     let agents = sim
         .agents()
         .iter()
@@ -149,14 +160,21 @@ fn build_export(
         .collect();
 
     let mut frames = Vec::new();
+    let mut narrated: Vec<MatchEvent> = Vec::new();
     let mut ticks = 0;
     while sim.winner().is_none() && ticks < max_ticks {
         let events = sim.tick();
         ticks += 1;
+        let tick = sim.tick_count();
         let scored = events.iter().find_map(|e| match e {
             Event::Scored { team, .. } => Some(*team),
             _ => None,
         });
+        for ev in &events {
+            if let Some((kind, text)) = narrate(ev, &names) {
+                narrated.push(MatchEvent { tick, kind, text });
+            }
+        }
         frames.push(Frame {
             tick: sim.tick_count(),
             soul: xy(sim.soul().pos),
@@ -184,6 +202,60 @@ fn build_export(
         souls_to_win,
         agents,
         frames,
+        events: narrated,
         winner: sim.winner(),
     })
+}
+
+/// The name for an agent id, for the play-by-play.
+fn who(names: &[String], id: u32) -> &str {
+    names.get(id as usize).map_or("?", String::as_str)
+}
+
+/// Narrate a notable event for the play-by-play ticker — `(kind, text)`, or
+/// `None` for the per-tick noise (positions, routine pickups, whiffed strips).
+fn narrate(event: &Event, names: &[String]) -> Option<(&'static str, String)> {
+    match event {
+        Event::NewSoul => Some(("soul", "──── new soul ────".to_string())),
+        Event::SoulClaimed { agent } => {
+            Some(("info", format!("{} gathers it", who(names, *agent))))
+        }
+        Event::PassMade { from, to, chance } => Some((
+            "pass",
+            format!("{} → {} ({chance}%)", who(names, *from), who(names, *to)),
+        )),
+        Event::PassIntercepted { by } => {
+            Some(("turnover", format!("↳ intercepted by {}!", who(names, *by))))
+        }
+        Event::StripAttempt {
+            defender,
+            carrier,
+            chance,
+            success: true,
+        } => Some((
+            "turnover",
+            format!(
+                "{} strips {} ({chance}%)",
+                who(names, *defender),
+                who(names, *carrier)
+            ),
+        )),
+        Event::OfferingResolved {
+            carrier,
+            chance,
+            scored,
+        } => Some(if *scored {
+            (
+                "goal",
+                format!("⚑ {} SCORES ({chance}%)", who(names, *carrier)),
+            )
+        } else {
+            (
+                "shot",
+                format!("{} offers ({chance}%) — no good", who(names, *carrier)),
+            )
+        }),
+        Event::MatchOver { winner } => Some(("end", format!("FINAL — team {winner} wins"))),
+        _ => None,
+    }
 }
