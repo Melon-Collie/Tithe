@@ -1,6 +1,8 @@
 # Tithe — Design Doc
 
 > **Intent/mindset snapshot, not a behavior spec.** This captures the original design grain and the *why*; it has drifted from how the code now behaves and isn't kept in lockstep with it. The code and its tests in `crates/tithe-sim` are authoritative on behavior — verify there, never audit code against this doc. See `CLAUDE.md` → *Source of truth*.
+>
+> **Spatial redesign in progress (§14).** The sport, attributes, and meta-game below still hold, but the *spatial model* — the continuous field, point-anchors, and bounded drift in §2–§3 — is being replaced by a **hex board with role footprints** (the auto-chess turn). Where §2/§3 and §14 disagree on the spatial/positioning model, **§14 is the current intent.**
 
 *Working draft. **Tithe** is a pure-manager sim for an invented ball sport — box-lacrosse bones under a fire-and-souls fiction — where the whole game is reading shapes, building identity, and out-coaching the league. The sport and the game share the name.*
 
@@ -221,3 +223,56 @@ The occult, folk-eerie register is **pure atmosphere — never mechanics.** The 
 - Full attribute list (derive by walking the sim loop).
 - Genesis onboarding: named coaching philosophies as drafting lenses; the editor's live ghost-preview teaching tactics by demonstration; pool scarcity curves.
 - Front-end framework (Svelte vs. React vs. egui) and distribution target (desktop-first vs. browser-first), after a Rust sim-core prototype proves the decoupling and the fun. Sim core (Rust) and architecture (decoupled) are settled.
+
+---
+
+## 14. Redesign: hex board + role footprints (the auto-chess turn)
+
+**Why.** The first prototype (continuous field, point-anchors with circular bounded drift, tendency-only roles) proved the *systems* — the nine attributes, the perceive/resolve Awareness layer, the role tendencies, the sport, the watchable event stream — but the spatial model was the fiddliest part and read more as "dots drifting" than as legible positional strategy. The redesign leans hard into an **auto-chess** feel: a hex board where each role is a **shaped zone (footprint)** the coach places, so coverage, gaps, and the passing ladder are *visible on the board*. **This supersedes the spatial/positioning model of §2–§3; everything else (sport genome §1, attributes §4, scouting/development/finances/season/atmosphere §4–§12) is unaffected.**
+
+### The board
+- **Hex grid**, with an **oval** playable region (the hexes whose centers fall inside an ellipse — a rounded stadium, no corners; the original "walled oval"). Hex coords/movement underneath; the oval is just a mask. Boundary hexes are the walls.
+- **Two 360°-scorable fires**, one at each long-axis end; a team carries the soul to **its own** fire to offer (the inversion stays). The offering/shot formula ports directly — distance is now in hexes.
+- **Smooth glide motion.** Decisions happen over the coarse hex/footprint model (slow clock); units still move *continuously* between hexes (fast clock). This deliberately keeps the §2 "coarse mind, continuous body → reads as a sport" pillar rather than going to discrete hops.
+- **~7 a side** (still a density dial, see below).
+- **Caroms: open.** Lean — oval *shape* now; bouncing souls off the walls is an optional later mechanic.
+
+### Footprints (the core)
+- A **role is a fixed-shape footprint** (a set of hexes) **+ tendencies**. The coach **freely places** each player's footprint anywhere (with an optional mirror) — **no regional constraints, and no two roles that differ only by region** (a tall column placed wide *is* a winger; placed central *is* a box-to-box — same role).
+- **Per phase**, like today's two formations: each player has an **attack footprint placement** and a **defend footprint placement** (paired with an offensive role and a defensive role).
+- **Off the ball:** the player holds his footprint and picks the **best hex within it** by the value field — modulated by **Positioning** (be in the right hex) and **Awareness** (read which hex). Mostly a hard boundary, with a **~1-hex soft edge** to step out and meet a carrier on his line.
+- **On the ball: release.** Gaining the soul frees him from the footprint to carry / pass / shoot toward goal (today's on-ball EV), with a **soft tether** — a rising "out-of-position" discount on carrying *far* from his footprint, so the default is to **recycle** (pass to a teammate already in an advanced zone) unless there's clear free space ahead (then carry it). He snaps back to the footprint when he gives it up.
+- **Coverage = the union of footprint placements; the gaps between them are the strategic space.** Placement *is* the team's passing ladder (offense) and its defensive net (defense). A high, stretched attacking ladder gives forward options but leaves the defensive footprints far away on the turnover — the conservation law, made visible.
+
+### Casting depth (footprint size × player)
+Footprint **size is fixed by the role**, not the attributes — but a **big** zone (Warden) demands high **Positioning + Awareness** to be run well, while a **small** zone (Destroyer) forgives a low-Positioning specialist. Matching players to the *size of zone they can actually cover* is the roster puzzle.
+
+### Shape grammar
+A footprint is a point in **size** (small · medium · large) × **aspect** (tall/narrow · wide/flat · compact) × **lean** (symmetric · directional). Every role below is a distinct point; the grammar is the guard against regional duplicates.
+
+### Role vocabulary (v1 — small on purpose, room to grow)
+
+**Offensive (in-possession)** — *shape · on-ball lean*
+- **Box-to-box** — tall/narrow column · balanced, carries the lane (wide = winger, central = B2B).
+- **Roamer** — wide/flat band · balanced carry vs pass, drifts laterally.
+- **Playmaker** — compact · pass-first, forward.
+- **Outlet** — compact, deep · safe recycle, low carry.
+- **Finisher** — finisher shell · shoot (Accuracy/Range + placement decide poacher-close vs gunner-far; split into two roles later only if "patient vs eager" needs to be a tendency, not just attributes).
+
+**Defensive (out-of-possession)** — *shape · challenge*
+- **Destroyer** — tiny (~3 hex), symmetric · trigger-happy.
+- **Presser** — forward-leaning, directional · aggressive, pushes up into the buildup.
+- **Warden** — large area · patient/contain (needs Positioning + Awareness).
+- **Sweeper** — wide/flat band · patient last line.
+- **Cheat** — compact, sits high · ~no challenge; positions by *offensive* value (the counter outlet), so it defends a man down for an instant break. The natural defensive casting for a Finisher.
+- **Tracker** — tall/narrow column · covers a vertical lane (the defensive counterpart to Box-to-box).
+
+### Coverage density — the master dial
+`density ≈ (team size × average footprint area) / playable hexes`. Too high → no gaps → no strategy; too low → swiss cheese. The sweet spot leaves **exploitable gaps between footprints**. Set grid dimensions, footprint hex-counts, and team size to a sensible start and **tune by eye in the prototype** (as with the original numbers).
+
+### Port vs. rebuild
+**Ports (reinterpreted):** the nine attributes (Positioning → "hold the right hex"; Pace → hexes/tick; **Awareness's perceive/resolve split wholesale**); roles-as-tendencies (carry/pass/shoot + challenge biases); the pair + phase model → per-phase footprint placements; the sport genome (strip, the offer formula, souls, first-to-X, transition); the value/EV decision (xT surface + cover-shadow, recomputed over hexes); two-clock / determinism / event stream / headless arch (hex integer coords make determinism *easier*); the whole viewer-legibility layer (numbers, ticker, hover, flashes); the coach-input boundary + web editor + AI-vs-AI tuning loop.
+**Rebuilt (the spatial floor):** continuous `Vec2` positions → hex coords; steering + separation → hex movement + occupancy; anchor + drift → footprints; formation = anchor list → footprint placements; value-field/pass-lane/shot geometry → hex-based.
+
+### Still open
+Caroms (yes/no); exact grid dimensions; each footprint's hex count; the density target; whether Finisher ever splits back into poacher/gunner.
