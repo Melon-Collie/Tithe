@@ -18,8 +18,10 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use tithe_sim::{
-    Event, InPossessionRole, MatchSetup, OutOfPossessionRole, Possession, Simulation, Vec2,
+    Board, Event, InPossessionRole, MatchSetup, OutOfPossessionRole, Possession, SimConfig,
+    Simulation, Vec2,
 };
 
 /// The single-page UI (formation editor + playback viewer), served at `/`.
@@ -33,6 +35,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index))
         .route("/api/default-setup", get(default_setup))
+        .route("/api/meta", get(meta))
         .route("/api/run", post(run_match));
 
     let addr = "127.0.0.1:8770";
@@ -50,6 +53,66 @@ async fn index() -> Html<&'static str> {
 /// The editable starting point: the same authored example as `tithe init`.
 async fn default_setup() -> Json<MatchSetup> {
     Json(MatchSetup::default_match())
+}
+
+/// Static view data the editor needs to *draw* (not part of the wire setup): the
+/// hex board and the per-role footprint shapes (§14), so the editor can render
+/// each player's zone. Read straight off [`SimConfig::default`] — the sim stays
+/// the source of truth for the shapes.
+#[derive(Serialize)]
+struct Meta {
+    arena: Arena,
+    board: BoardExport,
+    /// In-possession role → `[half_x, half_y, lean]`, keyed by the role's
+    /// serde name (snake_case) so the editor can look it up by the same string.
+    attack: BTreeMap<String, [f32; 3]>,
+    /// Out-of-possession role → `[half_x, half_y, lean]`.
+    defend: BTreeMap<String, [f32; 3]>,
+}
+
+async fn meta() -> Json<Meta> {
+    let cfg = SimConfig::default();
+    let board = Board::oval(cfg.hex_size, cfg.arena_half_x, cfg.arena_half_y);
+    let fp = |f: tithe_sim::world::Footprint| {
+        [
+            f.half_x.to_num::<f32>(),
+            f.half_y.to_num::<f32>(),
+            f.lean.to_num::<f32>(),
+        ]
+    };
+    // Keys must match the enums' serde rename (snake_case) — the same strings the
+    // roster dropdowns and AgentMeta use.
+    let mut attack = BTreeMap::new();
+    for (key, role) in [
+        ("box_to_box", InPossessionRole::BoxToBox),
+        ("roamer", InPossessionRole::Roamer),
+        ("playmaker", InPossessionRole::Playmaker),
+        ("outlet", InPossessionRole::Outlet),
+        ("finisher", InPossessionRole::Finisher),
+    ] {
+        attack.insert(key.to_string(), fp(cfg.on_ball_bias(role).footprint));
+    }
+    let mut defend = BTreeMap::new();
+    for (key, role) in [
+        ("destroyer", OutOfPossessionRole::Destroyer),
+        ("presser", OutOfPossessionRole::Presser),
+        ("warden", OutOfPossessionRole::Warden),
+        ("sweeper", OutOfPossessionRole::Sweeper),
+        ("cheat", OutOfPossessionRole::Cheat),
+        ("tracker", OutOfPossessionRole::Tracker),
+    ] {
+        defend.insert(key.to_string(), fp(cfg.defense_bias(role).footprint));
+    }
+    Json(Meta {
+        arena: Arena {
+            half_x: cfg.arena_half_x.to_num(),
+            half_y: cfg.arena_half_y.to_num(),
+            goal_x: cfg.goal_x.to_num(),
+        },
+        board: board_export(&board),
+        attack,
+        defend,
+    })
 }
 
 /// Body of `POST /api/run`: an authored matchup plus the run parameters.
@@ -74,11 +137,48 @@ async fn run_match(Json(req): Json<RunRequest>) -> Result<Json<MatchExport>, (St
 #[derive(Serialize)]
 struct MatchExport {
     arena: Arena,
+    board: BoardExport,
     souls_to_win: u32,
     agents: Vec<AgentMeta>,
     frames: Vec<Frame>,
     events: Vec<MatchEvent>,
     winner: Option<u8>,
+}
+
+/// The hex board for the viewer/editor (§14): hex size + the in-bounds cells,
+/// each as its axial coords and field center (the editor places players by hex).
+#[derive(Serialize)]
+struct BoardExport {
+    hex_size: f32,
+    hexes: Vec<HexCell>,
+}
+
+#[derive(Serialize)]
+struct HexCell {
+    q: i32,
+    r: i32,
+    x: f32,
+    y: f32,
+}
+
+/// Build the board export from a [`Board`] (shared by the viewer and the editor).
+fn board_export(board: &Board) -> BoardExport {
+    BoardExport {
+        hex_size: board.size().to_num(),
+        hexes: board
+            .cells()
+            .iter()
+            .map(|&h| {
+                let c = board.center(h);
+                HexCell {
+                    q: h.q,
+                    r: h.r,
+                    x: c.x.to_num(),
+                    y: c.y.to_num(),
+                }
+            })
+            .collect(),
+    }
 }
 
 /// A narrated play-by-play line, tagged with its tick (for syncing to playback),
@@ -169,6 +269,8 @@ fn build_export(
     };
     let souls_to_win = cfg.souls_to_win;
     let goals = sim.config().goals();
+
+    let board = board_export(&sim.board());
 
     let names: Vec<String> = sim.agents().iter().map(|a| a.name.clone()).collect();
     let agent_teams: Vec<u8> = sim.agents().iter().map(|a| a.team).collect();
@@ -269,6 +371,7 @@ fn build_export(
 
     Ok(MatchExport {
         arena,
+        board,
         souls_to_win,
         agents,
         frames,

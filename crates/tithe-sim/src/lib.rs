@@ -40,6 +40,7 @@
 pub mod decide;
 pub mod event;
 pub mod fx;
+pub mod hex;
 pub mod rng;
 pub mod setup;
 pub mod value;
@@ -48,6 +49,7 @@ pub mod world;
 pub use decide::Intent;
 pub use event::Event;
 pub use fx::{Fx, Vec2, WideFx};
+pub use hex::{Board, Hex};
 pub use rng::Rng;
 pub use setup::{MatchSetup, SetupError};
 pub use world::{Agent, Formation, Possession, SimConfig, Soul};
@@ -171,6 +173,16 @@ impl Simulation {
         &self.config
     }
 
+    /// The hex board (oval-clipped grid) this match plays on — for renderers and
+    /// (in the redesign) footprint placement. Derived from the arena + hex size.
+    pub fn board(&self) -> Board {
+        Board::oval(
+            self.config.hex_size,
+            self.config.arena_half_x,
+            self.config.arena_half_y,
+        )
+    }
+
     /// Advance one fixed timestep, returning the events emitted this tick.
     /// Once the match is over, ticking is a no-op (an empty stream).
     pub fn tick(&mut self) -> Vec<Event> {
@@ -224,6 +236,7 @@ impl Simulation {
     /// active-pursuit intents map straight to their target.
     fn run_decisions(&mut self) {
         let one = Fx::from_num(1);
+        let board = self.board();
         let carrier = self.carrier_info();
         let real_soul = self.soul.pos;
         let possession = self.soul.possession;
@@ -313,6 +326,7 @@ impl Simulation {
                     self.goals,
                     &p_allies,
                     &p_enemies,
+                    &board,
                     &self.config,
                 )
             } else {
@@ -576,6 +590,25 @@ impl Simulation {
             .map(|j| perceived[j])
             .collect();
 
+        // Soft tether (§14 Phase 3): the further the carrier has *already*
+        // strayed outside his footprint, the less he wants to keep carrying — so
+        // he looks to pass. It scales his carry appetite by how far out he is now
+        // (1 inside the zone), never the far lookahead, so a carrier in his zone
+        // drives freely (no hot-potato) and only a strayed one offloads.
+        let fwd = if enemy_goal.x >= zero { one } else { -one };
+        let footprint_center = bias
+            .footprint
+            .center(self.agents[carrier_id as usize].anchor, fwd);
+        // Reluctance, not refusal: blend the raw falloff up to a floor, so even a
+        // carrier well outside his zone keeps `carry_tether_floor` of his appetite
+        // ("you can leave your zone with the ball, you're just less inclined to").
+        let raw_tether = self
+            .config
+            .footprint_falloff(bias.footprint.dist_sq(footprint_center, carrier_pos))
+            .unwrap_or(zero);
+        let floor = self.config.carry_tether_floor;
+        let carry_tether = floor + (one - floor) * raw_tether;
+
         // Carrying: best route toward goal that dodges *perceived* pressure.
         let (carry_target, carry_ev) = self.best_carry_route(
             carrier_pos,
@@ -583,7 +616,7 @@ impl Simulation {
             enemy_goal,
             &p_enemies,
             &p_allies,
-            bias.carry_mult,
+            bias.carry_mult * carry_tether,
         );
 
         // Shooting from here (against the pressure he feels up close — real).
@@ -940,21 +973,27 @@ mod tests {
         );
     }
 
-    /// The defensive-role table has the intended shape: a Presser breaks shape
-    /// from further and a containing Anchor holds tighter and gates its lunge.
+    /// The defensive-role table has the intended shape: an aggressive Presser
+    /// (forward-leaning, no lunge gate) vs. a patient Sweeper (contains), and a
+    /// Cheat that never challenges. Footprint aspects match the grammar.
     #[test]
-    fn defense_bias_table_shapes_press_vs_contain() {
+    fn defense_bias_table_shapes_roles() {
         let cfg = SimConfig::default();
         let one = Fx::from_num(1);
         let presser = cfg.defense_bias(OutOfPossessionRole::Presser);
-        let anchor = cfg.defense_bias(OutOfPossessionRole::Anchor);
-        // Presser hounds from distance; Anchor only engages when close.
+        let sweeper = cfg.defense_bias(OutOfPossessionRole::Sweeper);
+        let cheat = cfg.defense_bias(OutOfPossessionRole::Cheat);
+        let tracker = cfg.defense_bias(OutOfPossessionRole::Tracker);
+        // Presser hounds from distance and leans forward; Sweeper holds and contains.
         assert!(presser.contest_range_mult > one);
-        assert!(anchor.contest_range_mult < one);
-        // The Anchor contains — it won't commit a long-odds lunge.
-        assert!(anchor.lunge_min_prob > Fx::from_num(0));
+        assert!(presser.footprint.lean > Fx::from_num(0));
         assert_eq!(presser.lunge_min_prob, Fx::from_num(0));
-        // The Anchor holds its shape tighter than it drifts by default.
-        assert!(anchor.drift_mult < one);
+        assert!(sweeper.lunge_min_prob > Fx::from_num(0));
+        // Cheat never breaks shape to challenge.
+        assert_eq!(cheat.contest_range_mult, Fx::from_num(0));
+        // Aspect grammar (x = along the field, y = across): Sweeper is a wide band
+        // across the last line; Tracker is a long lane along the field.
+        assert!(sweeper.footprint.half_y > sweeper.footprint.half_x);
+        assert!(tracker.footprint.half_x > tracker.footprint.half_y);
     }
 }

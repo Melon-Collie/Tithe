@@ -24,6 +24,9 @@ pub struct SimConfig {
     pub arena_half_x: Fx,
     /// Half-height of the arena (y half-extent).
     pub arena_half_y: Fx,
+    /// Hex size (center-to-vertex) of the board grid (§14 redesign). The oval
+    /// board is the hexes of this size inside the `arena_half_*` ellipse.
+    pub hex_size: Fx,
     /// How close an agent must get to a loose soul to claim it.
     pub pickup_radius: Fx,
     /// Farthest a player will chase a loose soul (even its team's nearest holds
@@ -107,9 +110,22 @@ pub struct SimConfig {
     /// interpolated between these (Pace 0.5 ≈ the average 1.0).
     pub pace_floor: Fx,
     pub pace_ceil: Fx,
-    /// How far an off-ball agent may shade off its anchor toward the play
-    /// (bounded drift / elasticity — the shape breathes but never dissolves).
-    pub drift_radius: Fx,
+    /// Soft-edge firmness on the footprint (§14 Phase 3). A spot *outside* the
+    /// role's footprint ellipse has its appeal divided by `1 + this·(d − 1)`,
+    /// where `d` is the squared normalized ellipse distance (`d ≤ 1` inside). A
+    /// bigger value pins agents harder inside their zone; the edge is soft, not a
+    /// wall — a much better spot just past the line is still worth stepping to.
+    pub footprint_edge_softness: Fx,
+    /// Hard outer bound on the soft edge: a spot with `d` beyond this is never
+    /// considered (caps how far an agent — or a carrier's route — strays).
+    pub footprint_edge_max: Fx,
+    /// Floor on the carrier's soft tether (§14 Phase 3): the minimum carry
+    /// appetite a carrier keeps even when fully outside his footprint. On-ball is
+    /// *reluctance, not refusal* — "you can leave your zone with the ball, you're
+    /// just less inclined to." `1.0` disables the tether; `0.0` makes a strayed
+    /// carrier give it up entirely. (Off-ball positioning has no floor — the
+    /// defensive shape stays firm.)
+    pub carry_tether_floor: Fx,
     /// Max positional noise added to a Positioning-0 player's anchor each window
     /// (scales with `1 − positioning`; a disciplined player adds ~none).
     pub positioning_noise_max: Fx,
@@ -140,6 +156,23 @@ impl SimConfig {
     pub fn defense_bias(&self, role: OutOfPossessionRole) -> DefenseBias {
         self.defense_biases.for_role(role)
     }
+
+    /// Soft-edge appeal multiplier for a spot at squared ellipse distance `d`
+    /// from a footprint (§14 Phase 3): `1` inside (`d ≤ 1`), decaying as
+    /// `1/(1 + softness·(d − 1))` outside, and `None` past the hard outer bound
+    /// (the caller skips that spot). Lets agents leak just past the edge for a
+    /// much better spot while pinning them inside the zone otherwise.
+    pub fn footprint_falloff(&self, d: Fx) -> Option<Fx> {
+        if d > self.footprint_edge_max {
+            return None;
+        }
+        let one = Fx::from_num(1);
+        if d <= one {
+            Some(one)
+        } else {
+            Some(one / (one + self.footprint_edge_softness * (d - one)))
+        }
+    }
 }
 
 impl Default for SimConfig {
@@ -149,6 +182,8 @@ impl Default for SimConfig {
             max_speed: Fx::from_num(2),
             arena_half_x: Fx::from_num(50),
             arena_half_y: Fx::from_num(30),
+            hex_size: Fx::from_num(4), // ~14 hexes across × ~10 tall, oval-clipped
+
             pickup_radius: Fx::from_num(2),
             chase_max_dist: Fx::from_num(120),
             goal_x: Fx::from_num(45),
@@ -187,46 +222,63 @@ impl Default for SimConfig {
             stamina_speed_floor: Fx::from_num(55) / Fx::from_num(100), // 0.55
             pace_floor: Fx::from_num(75) / Fx::from_num(100),          // 0.75 (Pace 0)
             pace_ceil: Fx::from_num(125) / Fx::from_num(100),          // 1.25 (Pace 1)
-            drift_radius: Fx::from_num(10),
+            footprint_edge_softness: Fx::from_num(3),                  // firm but soft at the edge
+            footprint_edge_max: Fx::from_num(4), // never stray past 2× the radius
+            carry_tether_floor: Fx::from_num(6) / Fx::from_num(10), // 0.6 — reluctance, not refusal
             positioning_noise_max: Fx::from_num(8), // Positioning 0.5 ⇒ ±4 of drift
-            awareness_noise_max: Fx::from_num(6),   // Awareness 0 at ref dist ⇒ ±6
+            awareness_noise_max: Fx::from_num(6), // Awareness 0 at ref dist ⇒ ±6
             awareness_ref_dist: Fx::from_num(20),
             separation_radius: Fx::from_num(5) / Fx::from_num(2), // 2.5 (< strip_radius 3)
             separation_step: Fx::from_num(1),
-            // The role-tuning table. Each row weights an in-possession role's
-            // carry/pass/shoot appetite (multipliers in %, the shoot gate in %
-            // score-chance). Edit a row to change how that role plays.
+            // In-possession role table (§14). Tendency: carry/pass/shoot in %,
+            // shoot gate in % score-chance. Footprint: half_x × half_y (field
+            // units) + forward lean. NOTE: x is the goal-to-goal (play) axis —
+            // the arena's long axis — and y is across the field. So half_x > half_y
+            // is a lane *along* the field; half_y > half_x is a band *across* it.
+            // Edit a row to change how a role plays.
             role_biases: {
-                let bias = |carry: u32, pass: u32, shoot: u32, gate: u32, drift: u32| OnBallBias {
-                    carry_mult: Fx::from_num(carry) / Fx::from_num(100),
-                    pass_mult: Fx::from_num(pass) / Fx::from_num(100),
-                    shoot_mult: Fx::from_num(shoot) / Fx::from_num(100),
-                    min_shoot_prob: Fx::from_num(gate) / Fx::from_num(100),
-                    drift_mult: Fx::from_num(drift) / Fx::from_num(100),
-                };
+                let bias =
+                    |carry: u32, pass: u32, shoot: u32, gate: u32, hx: u32, hy: u32| OnBallBias {
+                        carry_mult: Fx::from_num(carry) / Fx::from_num(100),
+                        pass_mult: Fx::from_num(pass) / Fx::from_num(100),
+                        shoot_mult: Fx::from_num(shoot) / Fx::from_num(100),
+                        min_shoot_prob: Fx::from_num(gate) / Fx::from_num(100),
+                        footprint: Footprint {
+                            half_x: Fx::from_num(hx),
+                            half_y: Fx::from_num(hy),
+                            lean: Fx::from_num(0),
+                        },
+                    };
                 RoleBiases {
-                    //                        carry pass shoot gate drift
-                    balanced: bias(100, 100, 100, 0, 100),
-                    dangler: bias(140, 70, 90, 0, 110),
-                    playmaker: bias(90, 140, 90, 0, 100),
-                    stay_at_home: bias(40, 130, 70, 0, 40),
-                    sniper: bias(100, 90, 130, 45, 90),
-                    perimeter_shooter: bias(90, 90, 150, 0, 100),
+                    //                  carry pass shoot gate  hx  hy   shape
+                    box_to_box: bias(110, 100, 90, 0, 16, 6), // long lane along the field
+                    roamer: bias(100, 100, 90, 0, 6, 16),     // wide flat band across
+                    playmaker: bias(90, 140, 80, 0, 9, 9),    // compact
+                    outlet: bias(40, 130, 70, 0, 8, 8),       // compact, recycles
+                    finisher: bias(90, 90, 140, 0, 9, 9),     // shell, shoots
                 }
             },
-            // The defensive-role tuning table (contest-range / drift multipliers
-            // in %, lunge gate in % strip-chance). Edit a row to change a role.
+            // Out-of-possession role table (§14). contest-range in %, lunge gate
+            // in % strip-chance, footprint half_x × half_y + forward lean.
             defense_biases: {
-                let def = |contest: u32, drift: u32, lunge_gate: u32| DefenseBias {
-                    contest_range_mult: Fx::from_num(contest) / Fx::from_num(100),
-                    drift_mult: Fx::from_num(drift) / Fx::from_num(100),
-                    lunge_min_prob: Fx::from_num(lunge_gate) / Fx::from_num(100),
-                };
+                let def =
+                    |contest: u32, lunge_gate: u32, hx: u32, hy: u32, lean: u32| DefenseBias {
+                        contest_range_mult: Fx::from_num(contest) / Fx::from_num(100),
+                        lunge_min_prob: Fx::from_num(lunge_gate) / Fx::from_num(100),
+                        footprint: Footprint {
+                            half_x: Fx::from_num(hx),
+                            half_y: Fx::from_num(hy),
+                            lean: Fx::from_num(lean),
+                        },
+                    };
                 DefenseBiases {
-                    //                contest drift lunge_gate
-                    balanced: def(100, 100, 0),
-                    presser: def(160, 120, 0), // hounds from distance, lunges
-                    anchor: def(60, 50, 40),   // holds deep, contains (no <40% lunge)
+                    //              contest lunge  hx  hy  lean   shape
+                    destroyer: def(100, 0, 6, 6, 0), // tiny, trigger-happy
+                    presser: def(160, 0, 8, 8, 10),  // forward-leaning, aggressive
+                    warden: def(80, 35, 16, 14, 0),  // large, patient
+                    sweeper: def(60, 40, 6, 18, 0),  // wide band across the last line
+                    cheat: def(0, 90, 8, 8, 0),      // no challenge; offensive positioning
+                    tracker: def(100, 20, 16, 6, 0), // long lane along the field
                 }
             },
         }
@@ -352,132 +404,154 @@ fn draw_attribute(rng: &mut Rng) -> Fx {
     Fx::from_num(25 + rng.below(61)) / Fx::from_num(100)
 }
 
-/// A player's **in-possession** casting — what he does with the soul. One of
-/// the two role coach inputs (the other is [`OutOfPossessionRole`]). It biases
-/// the carry/pass/shoot decision via [`SimConfig::on_ball_bias`] — the same dumb
-/// EV scorer, different appetites (§2/§10: input quality, not compute). The
-/// *role* is tendency; the shooting *attributes* (Accuracy/Range) are capability.
+/// A player's **in-possession** casting (§14) — a fixed-shape footprint + an
+/// on-ball tendency. The footprint (a `Footprint` from [`SimConfig`]) sizes the
+/// off-ball zone; the tendency ([`OnBallBias`]) weights carry/pass/shoot. Same
+/// dumb scorer, different appetites; the *role* is tendency, the shooting
+/// *attributes* (Accuracy/Range) are capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InPossessionRole {
-    /// Neutral two-way casting (the default).
+    /// Tall/narrow column — balanced, carries the lane (wide = winger, central = B2B).
+    BoxToBox,
+    /// Wide/flat band — balanced carry vs pass, drifts laterally (the default).
     #[default]
-    Balanced,
-    /// Wants the soul on his stick — carries, rarely gives it up.
-    Dangler,
-    /// Pass-first distributor — finds the open outlet.
+    Roamer,
+    /// Compact — pass-first, forward.
     Playmaker,
-    /// Won't carry — dumps it off and holds his shape.
-    StayAtHome,
-    /// Patient finisher — only pulls the trigger on a high-% look (in tight).
-    Sniper,
-    /// Lets the long one fly — takes the shot from range.
-    PerimeterShooter,
+    /// Compact, sits deep — safe recycle, low carry.
+    Outlet,
+    /// Finisher shell — shoots (Accuracy/Range + placement = the style).
+    Finisher,
 }
 
-/// A player's **out-of-possession** casting — what he does without the soul.
-/// A *label* this slice (carried for the watch view); role-conditioned defensive
-/// behavior arrives with the defensive-role design.
+/// A player's **out-of-possession** casting (§14) — a fixed-shape footprint + a
+/// challenge tendency ([`DefenseBias`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutOfPossessionRole {
-    /// Neutral two-way casting (the default).
-    #[default]
-    Balanced,
-    /// High closer — breaks shape to pressure the enemy carrier.
+    /// Tiny symmetric zone — trigger-happy challenge.
+    Destroyer,
+    /// Forward-leaning zone — aggressive, pushes up into the buildup.
     Presser,
-    /// Deep safety / help defender near its own goal.
-    Anchor,
+    /// Large area — patient/contain (needs Positioning + Awareness) — the default.
+    #[default]
+    Warden,
+    /// Wide/flat band — patient last line.
+    Sweeper,
+    /// Compact, sits high — ~no challenge; positions by *offensive* value (the
+    /// counter outlet), defending a man down for the break.
+    Cheat,
+    /// Tall/narrow column — covers a vertical lane.
+    Tracker,
 }
 
-/// Per-role weighting on the carry/pass/shoot decision — the whole role-tuning
-/// surface. Each field scales the *upside* of an action (never the net EV, so a
-/// role's appetite changes what it reaches for without faking away the risk).
+/// A role's footprint shape — an ellipse of legal hexes around the anchor, with
+/// an optional forward `lean`. `half_x` × `half_y` is the size×aspect grammar
+/// (tall/narrow vs wide/flat vs blob); `lean` shifts it toward the enemy goal
+/// (the Presser's directional push). The off-ball decision picks the best board
+/// hex inside it.
+#[derive(Debug, Clone, Copy)]
+pub struct Footprint {
+    pub half_x: Fx,
+    pub half_y: Fx,
+    pub lean: Fx,
+}
+
+impl Footprint {
+    /// Where the footprint sits: the anchor shifted by `lean` toward the enemy
+    /// goal. `fwd` is the sign of the enemy-goal direction (`+1` / `-1`).
+    pub fn center(&self, anchor: Vec2, fwd: Fx) -> Vec2 {
+        Vec2::new(anchor.x + self.lean * fwd, anchor.y)
+    }
+
+    /// Squared normalized ellipse distance of `point` from the footprint placed
+    /// at `center`: `≤ 1` inside the shape, `> 1` outside (the soft-edge metric).
+    pub fn dist_sq(&self, center: Vec2, point: Vec2) -> Fx {
+        let nx = (point.x - center.x) / self.half_x;
+        let ny = (point.y - center.y) / self.half_y;
+        nx * nx + ny * ny
+    }
+}
+
+/// Per-role weighting on the carry/pass/shoot decision **plus** the off-ball
+/// footprint shape — the whole in-possession role-tuning surface. The multipliers
+/// scale the *upside* of an action (never the net EV, so risk stays honest).
 #[derive(Debug, Clone, Copy)]
 pub struct OnBallBias {
-    /// Scales the value of carrying (Dangler ↑, Stay-at-home ↓).
+    /// Scales the value of carrying.
     pub carry_mult: Fx,
-    /// Scales the value of passing (Playmaker ↑).
+    /// Scales the value of passing (Playmaker/Outlet ↑).
     pub pass_mult: Fx,
-    /// Scales the value of shooting (Sniper/Perimeter ↑).
+    /// Scales the value of shooting (Finisher ↑).
     pub shoot_mult: Fx,
-    /// A shooter below this score chance won't pull the trigger (the Sniper gate,
-    /// 0 = no gate).
+    /// A shooter below this score chance won't pull the trigger (0 = no gate).
     pub min_shoot_prob: Fx,
-    /// Scales off-ball drift from the anchor (Stay-at-home ↓ = hugs his shape).
-    pub drift_mult: Fx,
-}
-
-impl OnBallBias {
-    /// Neutral weighting — every multiplier 1, no shoot gate.
-    pub fn neutral() -> Self {
-        let one = Fx::from_num(1);
-        Self {
-            carry_mult: one,
-            pass_mult: one,
-            shoot_mult: one,
-            min_shoot_prob: Fx::from_num(0),
-            drift_mult: one,
-        }
-    }
+    /// The off-ball footprint shape for this role.
+    pub footprint: Footprint,
 }
 
 /// The tunable per-[`InPossessionRole`] bias table (a [`SimConfig`] dial). To
 /// change how a role plays, edit its row in [`SimConfig::default`].
 #[derive(Debug, Clone, Copy)]
 pub struct RoleBiases {
-    pub balanced: OnBallBias,
-    pub dangler: OnBallBias,
+    pub box_to_box: OnBallBias,
+    pub roamer: OnBallBias,
     pub playmaker: OnBallBias,
-    pub stay_at_home: OnBallBias,
-    pub sniper: OnBallBias,
-    pub perimeter_shooter: OnBallBias,
+    pub outlet: OnBallBias,
+    pub finisher: OnBallBias,
 }
 
 impl RoleBiases {
     /// The bias for a given in-possession role.
     pub fn for_role(&self, role: InPossessionRole) -> OnBallBias {
         match role {
-            InPossessionRole::Balanced => self.balanced,
-            InPossessionRole::Dangler => self.dangler,
+            InPossessionRole::BoxToBox => self.box_to_box,
+            InPossessionRole::Roamer => self.roamer,
             InPossessionRole::Playmaker => self.playmaker,
-            InPossessionRole::StayAtHome => self.stay_at_home,
-            InPossessionRole::Sniper => self.sniper,
-            InPossessionRole::PerimeterShooter => self.perimeter_shooter,
+            InPossessionRole::Outlet => self.outlet,
+            InPossessionRole::Finisher => self.finisher,
         }
     }
 }
 
-/// Per-[`OutOfPossessionRole`] weighting on defending — how far a defender
-/// breaks shape, how tightly it holds, and whether it commits to a strip. Like
-/// [`OnBallBias`], the whole defensive-role tuning surface.
+/// Per-[`OutOfPossessionRole`] weighting on defending — the challenge tendency
+/// **plus** the off-ball footprint shape. Like [`OnBallBias`], the whole
+/// defensive role-tuning surface.
 #[derive(Debug, Clone, Copy)]
 pub struct DefenseBias {
     /// Scales how far the carrier must be before this defender breaks shape to
-    /// close down (Presser ↑ hounds from distance, Anchor ↓ holds until close).
+    /// close down (Presser ↑ hounds from distance, Sweeper ↓ holds until close;
+    /// 0 = never breaks shape, like a Cheat).
     pub contest_range_mult: Fx,
-    /// Scales off-ball drift from the anchor (Anchor ↓ = disciplined deep cover).
-    pub drift_mult: Fx,
-    /// A defender won't commit a lunge whose strip chance is below this — an
-    /// Anchor *contains* (no whiff, no seam) rather than gambling. 0 = always lunge.
+    /// A defender won't commit a lunge whose strip chance is below this — a
+    /// patient role *contains* (no whiff, no seam) rather than gambling.
     pub lunge_min_prob: Fx,
+    /// The off-ball footprint shape for this role.
+    pub footprint: Footprint,
 }
 
 /// The tunable per-[`OutOfPossessionRole`] bias table (a [`SimConfig`] dial).
 #[derive(Debug, Clone, Copy)]
 pub struct DefenseBiases {
-    pub balanced: DefenseBias,
+    pub destroyer: DefenseBias,
     pub presser: DefenseBias,
-    pub anchor: DefenseBias,
+    pub warden: DefenseBias,
+    pub sweeper: DefenseBias,
+    pub cheat: DefenseBias,
+    pub tracker: DefenseBias,
 }
 
 impl DefenseBiases {
     /// The bias for a given out-of-possession role.
     pub fn for_role(&self, role: OutOfPossessionRole) -> DefenseBias {
         match role {
-            OutOfPossessionRole::Balanced => self.balanced,
+            OutOfPossessionRole::Destroyer => self.destroyer,
             OutOfPossessionRole::Presser => self.presser,
-            OutOfPossessionRole::Anchor => self.anchor,
+            OutOfPossessionRole::Warden => self.warden,
+            OutOfPossessionRole::Sweeper => self.sweeper,
+            OutOfPossessionRole::Cheat => self.cheat,
+            OutOfPossessionRole::Tracker => self.tracker,
         }
     }
 }
