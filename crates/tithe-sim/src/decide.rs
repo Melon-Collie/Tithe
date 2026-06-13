@@ -15,6 +15,7 @@
 //! choice is reproducible.
 
 use crate::fx::{Fx, Vec2};
+use crate::hex::Board;
 use crate::value;
 use crate::world::{Agent, SimConfig, Soul};
 
@@ -109,23 +110,25 @@ pub fn target_for(
     }
 }
 
-/// Where an off-ball agent should shade, chosen by the value field within a
-/// bounded drift of its anchor (the shape breathes, never dissolves):
+/// Where an off-ball agent should shade — the best **hex** within its footprint
+/// (§14): the board cells whose centers lie within the role's drift of the
+/// (noised) anchor. The off-ball decision now lives on the hex grid.
 ///
 /// - **Attacking** (my team has the soul): be a great pass target — maximize
 ///   `value_at × lane_clear(from the carrier)`. Open, advanced, and reachable.
-/// - **Defending / loose:** cover the threat — go to the spot of highest
-///   *enemy* value (close to their goal, currently uncovered by us). Getting
-///   into lanes and challenging falls out of denying that value.
+/// - **Defending / loose:** cover the threat — the hex that shadows the carrier's
+///   most dangerous lane. Getting into lanes falls out of denying that value.
 ///
-/// We read the value field at a few stand-positions and pick the best — a
-/// pointwise *perception* of where to be, not lookahead or search (§2).
+/// A pointwise *perception* of where to be, not lookahead or search (§2). Phase
+/// 2a: the footprint is the drift disc discretized to hexes; role-specific
+/// shapes (the locked vocabulary) replace the disc in 2b.
 pub fn off_ball_target(
     agent: &Agent,
     carrier: Option<CarrierInfo>,
     goals: [Vec2; 2],
     allies: &[Vec2],
     enemies: &[Vec2],
+    board: &Board,
     config: &SimConfig,
 ) -> Vec2 {
     // Loose soul: hold the anchor (the nearest agent chases it; everyone holds).
@@ -136,19 +139,23 @@ pub fn off_ball_target(
     let my_goal = goals[agent.team as usize];
     let enemy_goal = goals[1 - agent.team as usize];
 
-    // The role's drift appetite tightens or loosens how far it shades off its
-    // anchor — the in-possession role when attacking (Stay-at-home hugs, Dangler
-    // roams), the out-of-possession role when defending (Anchor holds tight).
+    // The role's drift appetite sizes the footprint — the in-possession role when
+    // attacking (Stay-at-home hugs, Dangler roams), the out-of-possession role
+    // when defending (Anchor holds tight).
     let drift_mult = if attacking {
         config.on_ball_bias(agent.attack_role).drift_mult
     } else {
         config.defense_bias(agent.defend_role).drift_mult
     };
     let drift = config.drift_radius * drift_mult;
+
     let mut best = agent.anchor;
     let mut best_score = Fx::from_num(-1);
-    for offset in candidate_offsets(drift) {
-        let candidate = agent.anchor + offset;
+    for &hex in board.cells() {
+        let candidate = board.center(hex);
+        if candidate.distance_to(agent.anchor) > drift {
+            continue; // outside the footprint
+        }
         let score = if attacking {
             // Be a great pass target: open, advanced, reachable from the carrier.
             let reachable = value::lane_clear(carrier.pos, candidate, enemies, config);
@@ -180,24 +187,6 @@ pub fn off_ball_target(
         }
     }
     best
-}
-
-/// The bounded set of stand-positions an off-ball agent considers: its anchor
-/// plus eight compass offsets at the drift radius.
-fn candidate_offsets(drift: Fx) -> [Vec2; 9] {
-    let zero = Fx::from_num(0);
-    let diag = drift * Fx::from_num(7) / Fx::from_num(10); // ~0.7·drift, so the diagonal ≈ drift
-    [
-        Vec2::new(zero, zero),
-        Vec2::new(drift, zero),
-        Vec2::new(-drift, zero),
-        Vec2::new(zero, drift),
-        Vec2::new(zero, -drift),
-        Vec2::new(diag, diag),
-        Vec2::new(diag, -diag),
-        Vec2::new(-diag, diag),
-        Vec2::new(-diag, -diag),
-    ]
 }
 
 #[cfg(test)]
@@ -273,10 +262,11 @@ mod tests {
             team: 0,
             pos: Vec2::new(Fx::from_num(80), Fx::from_num(0)),
         });
-        let target = off_ball_target(&me, carrier, goals, &[], &enemies, &cfg);
+        let board = Board::oval(cfg.hex_size, cfg.arena_half_x, cfg.arena_half_y);
+        let target = off_ball_target(&me, carrier, goals, &[], &enemies, &board, &cfg);
         // I should not stay on the crowded anchor...
         assert_ne!(target, me.anchor);
-        // ...and the shade stays within the drift budget.
+        // ...and the chosen hex stays within the drift footprint.
         assert!(
             (target - me.anchor).length() <= cfg.drift_radius + Fx::from_num(1) / Fx::from_num(100)
         );

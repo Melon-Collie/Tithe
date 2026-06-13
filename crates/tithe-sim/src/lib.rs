@@ -236,6 +236,7 @@ impl Simulation {
     /// active-pursuit intents map straight to their target.
     fn run_decisions(&mut self) {
         let one = Fx::from_num(1);
+        let board = self.board();
         let carrier = self.carrier_info();
         let real_soul = self.soul.pos;
         let possession = self.soul.possession;
@@ -325,6 +326,7 @@ impl Simulation {
                     self.goals,
                     &p_allies,
                     &p_enemies,
+                    &board,
                     &self.config,
                 )
             } else {
