@@ -590,6 +590,25 @@ impl Simulation {
             .map(|j| perceived[j])
             .collect();
 
+        // Soft tether (§14 Phase 3): the further the carrier has *already*
+        // strayed outside his footprint, the less he wants to keep carrying — so
+        // he looks to pass. It scales his carry appetite by how far out he is now
+        // (1 inside the zone), never the far lookahead, so a carrier in his zone
+        // drives freely (no hot-potato) and only a strayed one offloads.
+        let fwd = if enemy_goal.x >= zero { one } else { -one };
+        let footprint_center = bias
+            .footprint
+            .center(self.agents[carrier_id as usize].anchor, fwd);
+        // Reluctance, not refusal: blend the raw falloff up to a floor, so even a
+        // carrier well outside his zone keeps `carry_tether_floor` of his appetite
+        // ("you can leave your zone with the ball, you're just less inclined to").
+        let raw_tether = self
+            .config
+            .footprint_falloff(bias.footprint.dist_sq(footprint_center, carrier_pos))
+            .unwrap_or(zero);
+        let floor = self.config.carry_tether_floor;
+        let carry_tether = floor + (one - floor) * raw_tether;
+
         // Carrying: best route toward goal that dodges *perceived* pressure.
         let (carry_target, carry_ev) = self.best_carry_route(
             carrier_pos,
@@ -597,7 +616,7 @@ impl Simulation {
             enemy_goal,
             &p_enemies,
             &p_allies,
-            bias.carry_mult,
+            bias.carry_mult * carry_tether,
         );
 
         // Shooting from here (against the pressure he feels up close — real).

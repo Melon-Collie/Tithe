@@ -110,9 +110,22 @@ pub struct SimConfig {
     /// interpolated between these (Pace 0.5 ≈ the average 1.0).
     pub pace_floor: Fx,
     pub pace_ceil: Fx,
-    /// How far an off-ball agent may shade off its anchor toward the play
-    /// (bounded drift / elasticity — the shape breathes but never dissolves).
-    pub drift_radius: Fx,
+    /// Soft-edge firmness on the footprint (§14 Phase 3). A spot *outside* the
+    /// role's footprint ellipse has its appeal divided by `1 + this·(d − 1)`,
+    /// where `d` is the squared normalized ellipse distance (`d ≤ 1` inside). A
+    /// bigger value pins agents harder inside their zone; the edge is soft, not a
+    /// wall — a much better spot just past the line is still worth stepping to.
+    pub footprint_edge_softness: Fx,
+    /// Hard outer bound on the soft edge: a spot with `d` beyond this is never
+    /// considered (caps how far an agent — or a carrier's route — strays).
+    pub footprint_edge_max: Fx,
+    /// Floor on the carrier's soft tether (§14 Phase 3): the minimum carry
+    /// appetite a carrier keeps even when fully outside his footprint. On-ball is
+    /// *reluctance, not refusal* — "you can leave your zone with the ball, you're
+    /// just less inclined to." `1.0` disables the tether; `0.0` makes a strayed
+    /// carrier give it up entirely. (Off-ball positioning has no floor — the
+    /// defensive shape stays firm.)
+    pub carry_tether_floor: Fx,
     /// Max positional noise added to a Positioning-0 player's anchor each window
     /// (scales with `1 − positioning`; a disciplined player adds ~none).
     pub positioning_noise_max: Fx,
@@ -142,6 +155,23 @@ impl SimConfig {
     /// The defensive bias for an out-of-possession role (shorthand for the table).
     pub fn defense_bias(&self, role: OutOfPossessionRole) -> DefenseBias {
         self.defense_biases.for_role(role)
+    }
+
+    /// Soft-edge appeal multiplier for a spot at squared ellipse distance `d`
+    /// from a footprint (§14 Phase 3): `1` inside (`d ≤ 1`), decaying as
+    /// `1/(1 + softness·(d − 1))` outside, and `None` past the hard outer bound
+    /// (the caller skips that spot). Lets agents leak just past the edge for a
+    /// much better spot while pinning them inside the zone otherwise.
+    pub fn footprint_falloff(&self, d: Fx) -> Option<Fx> {
+        if d > self.footprint_edge_max {
+            return None;
+        }
+        let one = Fx::from_num(1);
+        if d <= one {
+            Some(one)
+        } else {
+            Some(one / (one + self.footprint_edge_softness * (d - one)))
+        }
     }
 }
 
@@ -192,9 +222,11 @@ impl Default for SimConfig {
             stamina_speed_floor: Fx::from_num(55) / Fx::from_num(100), // 0.55
             pace_floor: Fx::from_num(75) / Fx::from_num(100),          // 0.75 (Pace 0)
             pace_ceil: Fx::from_num(125) / Fx::from_num(100),          // 1.25 (Pace 1)
-            drift_radius: Fx::from_num(10),
+            footprint_edge_softness: Fx::from_num(3),                  // firm but soft at the edge
+            footprint_edge_max: Fx::from_num(4), // never stray past 2× the radius
+            carry_tether_floor: Fx::from_num(6) / Fx::from_num(10), // 0.6 — reluctance, not refusal
             positioning_noise_max: Fx::from_num(8), // Positioning 0.5 ⇒ ±4 of drift
-            awareness_noise_max: Fx::from_num(6),   // Awareness 0 at ref dist ⇒ ±6
+            awareness_noise_max: Fx::from_num(6), // Awareness 0 at ref dist ⇒ ±6
             awareness_ref_dist: Fx::from_num(20),
             separation_radius: Fx::from_num(5) / Fx::from_num(2), // 2.5 (< strip_radius 3)
             separation_step: Fx::from_num(1),
@@ -421,6 +453,22 @@ pub struct Footprint {
     pub half_x: Fx,
     pub half_y: Fx,
     pub lean: Fx,
+}
+
+impl Footprint {
+    /// Where the footprint sits: the anchor shifted by `lean` toward the enemy
+    /// goal. `fwd` is the sign of the enemy-goal direction (`+1` / `-1`).
+    pub fn center(&self, anchor: Vec2, fwd: Fx) -> Vec2 {
+        Vec2::new(anchor.x + self.lean * fwd, anchor.y)
+    }
+
+    /// Squared normalized ellipse distance of `point` from the footprint placed
+    /// at `center`: `≤ 1` inside the shape, `> 1` outside (the soft-edge metric).
+    pub fn dist_sq(&self, center: Vec2, point: Vec2) -> Fx {
+        let nx = (point.x - center.x) / self.half_x;
+        let ny = (point.y - center.y) / self.half_y;
+        nx * nx + ny * ny
+    }
 }
 
 /// Per-role weighting on the carry/pass/shoot decision **plus** the off-ball

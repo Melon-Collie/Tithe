@@ -154,21 +154,20 @@ pub fn off_ball_target(
     } else {
         Fx::from_num(-1)
     };
-    let center_x = agent.anchor.x + footprint.lean * fwd;
-    let center_y = agent.anchor.y;
-    let one = Fx::from_num(1);
+    let center = footprint.center(agent.anchor, fwd);
 
     let mut best = agent.anchor;
     let mut best_score = Fx::from_num(-1);
     for &hex in board.cells() {
         let candidate = board.center(hex);
-        // Inside the footprint ellipse?
-        let nx = (candidate.x - center_x) / footprint.half_x;
-        let ny = (candidate.y - center_y) / footprint.half_y;
-        if nx * nx + ny * ny > one {
+        // Soft edge (§14 Phase 3): inside the footprint costs nothing; just
+        // outside is penalized and steeply discounted with distance; far outside
+        // isn't considered at all. An agent leaks past the line only for a much
+        // better spot — "mostly never leaves the zone, except at the very edge."
+        let Some(falloff) = config.footprint_falloff(footprint.dist_sq(center, candidate)) else {
             continue;
-        }
-        let score = if attacking {
+        };
+        let raw = if attacking {
             // Be a great pass target: open, advanced, reachable from the carrier.
             let reachable = value::lane_clear(carrier.pos, candidate, enemies, config);
             value::value_at(candidate, my_goal, enemies, config) * reachable
@@ -197,6 +196,7 @@ pub fn off_ball_target(
             }
             removed
         };
+        let score = raw * falloff;
         if score > best_score {
             best_score = score;
             best = candidate;
@@ -282,11 +282,10 @@ mod tests {
         let target = off_ball_target(&me, carrier, goals, &[], &enemies, &board, &cfg);
         // I should not stay on the crowded anchor...
         assert_ne!(target, me.anchor);
-        // ...and the chosen hex stays within the role's footprint ellipse.
+        // ...and the chosen hex stays within the soft edge's hard outer bound
+        // (Roamer leans 0, so the footprint is centered on the anchor).
         let fp = cfg.on_ball_bias(me.attack_role).footprint;
-        let nx = (target.x - me.anchor.x) / fp.half_x;
-        let ny = (target.y - me.anchor.y) / fp.half_y;
-        assert!(nx * nx + ny * ny <= Fx::from_num(1) + Fx::from_num(1) / Fx::from_num(100));
+        assert!(fp.dist_sq(me.anchor, target) <= cfg.footprint_edge_max);
     }
 
     #[test]
