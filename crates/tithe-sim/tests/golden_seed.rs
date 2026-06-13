@@ -4,6 +4,18 @@
 
 use tithe_sim::{Event, Rng, Simulation};
 
+/// FNV-1a (64-bit) over bytes — a *fixed* deterministic hash, deliberately not
+/// `std`'s `DefaultHasher` (whose seed is randomized per process). Used to fold a
+/// whole match's output into one digest for the golden-hash regression below.
+fn fnv1a(bytes: &[u8], mut h: u64) -> u64 {
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3); // FNV prime
+    }
+    h
+}
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
 /// Published SplitMix64 reference vectors for seed 0 (Vigna's `splitmix64.c`).
 /// These pin our generator byte-for-byte against the canonical algorithm.
 const SPLITMIX64_SEED0: [u64; 5] = [
@@ -248,6 +260,60 @@ fn offerings_can_miss() {
     assert!(
         missed,
         "scoring should not be guaranteed — offerings can miss"
+    );
+}
+
+#[test]
+fn golden_default_match_hash() {
+    use tithe_sim::{Fx, MatchSetup, Possession};
+
+    // A fixed match: the authored default roster (so roles, footprints, and the
+    // on-ball tether all run) at a pinned seed, played to a winner.
+    let setup = MatchSetup::default_match();
+    let mut sim = Simulation::from_setup(&setup, 0x_5EED_C0DE).expect("valid setup");
+
+    // Fold the whole output into one digest: per tick, every event (the canonical
+    // stream, via its stable Debug form) AND the continuous state as raw
+    // fixed-point bits (soul + each agent's position/stamina/stagger/possession).
+    // Events alone would miss silent motion drift; positions alone would miss
+    // event-content changes — together they pin behavior tightly.
+    let mut h = FNV_OFFSET;
+    let bits = |v: Fx| v.to_bits();
+    let mut ticks = 0u64;
+    while sim.winner().is_none() && ticks < 200_000 {
+        let events = sim.tick();
+        ticks += 1;
+        for e in &events {
+            h = fnv1a(format!("{e:?}").as_bytes(), h);
+        }
+        let soul = sim.soul();
+        h = fnv1a(&bits(soul.pos.x).to_le_bytes(), h);
+        h = fnv1a(&bits(soul.pos.y).to_le_bytes(), h);
+        let poss: u64 = match soul.possession {
+            Possession::Loose => 1,
+            Possession::Held(id) => 2 << 32 | id as u64,
+            Possession::InFlight { to, intercepted } => (3 + intercepted as u64) << 32 | to as u64,
+        };
+        h = fnv1a(&poss.to_le_bytes(), h);
+        for a in sim.agents() {
+            h = fnv1a(&bits(a.pos.x).to_le_bytes(), h);
+            h = fnv1a(&bits(a.pos.y).to_le_bytes(), h);
+            h = fnv1a(&bits(a.stamina).to_le_bytes(), h);
+            h = fnv1a(&(a.stagger as u64).to_le_bytes(), h);
+        }
+    }
+    h = fnv1a(&(sim.score()[0] as u64).to_le_bytes(), h);
+    h = fnv1a(&(sim.score()[1] as u64).to_le_bytes(), h);
+    h = fnv1a(&(sim.winner().map_or(0xFF, u64::from)).to_le_bytes(), h);
+    h = fnv1a(&ticks.to_le_bytes(), h);
+
+    // The golden value. An UNEXPECTED change here is a determinism break (a float
+    // crept in, iteration order shifted, ambient RNG) — investigate before
+    // touching it. An EXPECTED change (you altered sim behavior on purpose) means
+    // re-pin it in the same commit, after confirming the diff is the intended one.
+    assert_eq!(
+        h, 0x79fd_5cde_8969_65b9,
+        "golden match hash changed — actual = {h:#018x}"
     );
 }
 
