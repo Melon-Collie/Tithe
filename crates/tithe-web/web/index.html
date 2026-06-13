@@ -105,8 +105,8 @@
   const ARENA = { half_x: 50, half_y: 30, goal_x: 45 };
   const FLASH_TICKS = 18; // how long an event ring lingers (ticks)
   const teamColor = t => (t === 0 ? '#e8643c' : '#4c9be8');
-  const roleAbbr = r => ({ balanced:'BAL', dangler:'DAN', playmaker:'PLY', stay_at_home:'STA',
-                           sniper:'SNP', perimeter_shooter:'PER', presser:'PRS', anchor:'ANC' }[r] || r);
+  const roleAbbr = r => ({ box_to_box:'B2B', roamer:'ROAM', playmaker:'PLY', outlet:'OUT', finisher:'FIN',
+                           destroyer:'DES', presser:'PRS', warden:'WAR', sweeper:'SWP', cheat:'CHT', tracker:'TRK' }[r] || r);
 
   // A field<->screen mapping for a canvas (shared by the boards and the viewer).
   function field(canvas) {
@@ -205,9 +205,10 @@
   function drawAll() { boards.forEach(drawBoard); }
 
   // ---- editable roster -------------------------------------------------------
-  const ATTACK_ROLES = [['balanced','Balanced'],['dangler','Dangler'],['playmaker','Playmaker'],
-                        ['stay_at_home','Stay-home'],['sniper','Sniper'],['perimeter_shooter','Perimeter']];
-  const DEFEND_ROLES = [['balanced','Balanced'],['presser','Presser'],['anchor','Anchor']];
+  const ATTACK_ROLES = [['box_to_box','Box-to-box'],['roamer','Roamer'],['playmaker','Playmaker'],
+                        ['outlet','Outlet'],['finisher','Finisher']];
+  const DEFEND_ROLES = [['destroyer','Destroyer'],['presser','Presser'],['warden','Warden'],
+                        ['sweeper','Sweeper'],['cheat','Cheat'],['tracker','Tracker']];
   const ATTRS = [['acc','A'],['rng','R'],['hand','H'],['strip','S'],['cont','C'],['pass','P'],['pos','Po'],['pace','Pc'],['awr','Aw']];
 
   function selectHtml(field, options, current, t, i) {

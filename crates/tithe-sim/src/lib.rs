@@ -954,21 +954,26 @@ mod tests {
         );
     }
 
-    /// The defensive-role table has the intended shape: a Presser breaks shape
-    /// from further and a containing Anchor holds tighter and gates its lunge.
+    /// The defensive-role table has the intended shape: an aggressive Presser
+    /// (forward-leaning, no lunge gate) vs. a patient Sweeper (contains), and a
+    /// Cheat that never challenges. Footprint aspects match the grammar.
     #[test]
-    fn defense_bias_table_shapes_press_vs_contain() {
+    fn defense_bias_table_shapes_roles() {
         let cfg = SimConfig::default();
         let one = Fx::from_num(1);
         let presser = cfg.defense_bias(OutOfPossessionRole::Presser);
-        let anchor = cfg.defense_bias(OutOfPossessionRole::Anchor);
-        // Presser hounds from distance; Anchor only engages when close.
+        let sweeper = cfg.defense_bias(OutOfPossessionRole::Sweeper);
+        let cheat = cfg.defense_bias(OutOfPossessionRole::Cheat);
+        let tracker = cfg.defense_bias(OutOfPossessionRole::Tracker);
+        // Presser hounds from distance and leans forward; Sweeper holds and contains.
         assert!(presser.contest_range_mult > one);
-        assert!(anchor.contest_range_mult < one);
-        // The Anchor contains — it won't commit a long-odds lunge.
-        assert!(anchor.lunge_min_prob > Fx::from_num(0));
+        assert!(presser.footprint.lean > Fx::from_num(0));
         assert_eq!(presser.lunge_min_prob, Fx::from_num(0));
-        // The Anchor holds its shape tighter than it drifts by default.
-        assert!(anchor.drift_mult < one);
+        assert!(sweeper.lunge_min_prob > Fx::from_num(0));
+        // Cheat never breaks shape to challenge.
+        assert_eq!(cheat.contest_range_mult, Fx::from_num(0));
+        // Aspect grammar: Sweeper is wide/flat, Tracker is tall/narrow.
+        assert!(sweeper.footprint.half_x > sweeper.footprint.half_y);
+        assert!(tracker.footprint.half_y > tracker.footprint.half_x);
     }
 }

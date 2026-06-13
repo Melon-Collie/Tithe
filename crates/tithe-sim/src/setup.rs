@@ -308,44 +308,44 @@ impl MatchSetup {
                     &[
                         (
                             "Vale",
-                            IP::StayAtHome,
-                            OP::Anchor,
+                            IP::Outlet,
+                            OP::Sweeper,
                             [20, 20, 35, 70, 65, 45, 75, 40, 60],
                         ),
                         (
                             "Crane",
-                            IP::Dangler,
-                            OP::Balanced,
+                            IP::Roamer,
+                            OP::Warden,
                             [45, 45, 50, 50, 50, 55, 50, 70, 50],
                         ),
                         (
                             "Ash",
                             IP::Playmaker,
-                            OP::Balanced,
+                            OP::Tracker,
                             [40, 35, 65, 35, 55, 80, 60, 50, 75],
                         ),
                         (
                             "Rook",
-                            IP::Balanced,
-                            OP::Balanced,
+                            IP::BoxToBox,
+                            OP::Warden,
                             [50, 45, 50, 55, 50, 50, 50, 55, 50],
                         ),
                         (
                             "Pyre",
-                            IP::Balanced,
+                            IP::Roamer,
                             OP::Presser,
                             [50, 35, 40, 65, 60, 35, 45, 75, 45],
                         ),
                         (
                             "Sear",
-                            IP::Sniper,
-                            OP::Balanced,
+                            IP::Finisher,
+                            OP::Cheat,
                             [85, 30, 55, 30, 40, 50, 55, 60, 70],
                         ),
                         (
                             "Knell",
-                            IP::Balanced,
-                            OP::Presser,
+                            IP::Roamer,
+                            OP::Destroyer,
                             [45, 40, 40, 60, 65, 40, 40, 65, 40],
                         ),
                     ],
@@ -355,44 +355,44 @@ impl MatchSetup {
                     &[
                         (
                             "Holt",
-                            IP::StayAtHome,
-                            OP::Anchor,
+                            IP::Outlet,
+                            OP::Sweeper,
                             [25, 25, 35, 75, 60, 40, 80, 40, 65],
                         ),
                         (
                             "Bram",
-                            IP::Dangler,
-                            OP::Balanced,
+                            IP::Roamer,
+                            OP::Warden,
                             [50, 45, 50, 50, 50, 55, 45, 70, 50],
                         ),
                         (
                             "Fen",
                             IP::Playmaker,
-                            OP::Balanced,
+                            OP::Tracker,
                             [45, 40, 70, 40, 50, 75, 60, 50, 80],
                         ),
                         (
                             "Cole",
-                            IP::Balanced,
-                            OP::Balanced,
+                            IP::BoxToBox,
+                            OP::Warden,
                             [50, 50, 50, 50, 55, 50, 50, 50, 50],
                         ),
                         (
                             "Dane",
-                            IP::Balanced,
+                            IP::Roamer,
                             OP::Presser,
                             [50, 35, 40, 60, 65, 35, 45, 75, 45],
                         ),
                         (
                             "Gar",
-                            IP::PerimeterShooter,
-                            OP::Balanced,
+                            IP::Finisher,
+                            OP::Cheat,
                             [55, 85, 55, 35, 45, 55, 35, 45, 40],
                         ),
                         (
                             "Ward",
-                            IP::Balanced,
-                            OP::Presser,
+                            IP::Roamer,
+                            OP::Destroyer,
                             [45, 40, 40, 65, 60, 45, 40, 65, 40],
                         ),
                     ],
@@ -460,9 +460,9 @@ mod tests {
     #[test]
     fn authored_attributes_and_metadata_carry_through() {
         let agents = build_agents(&MatchSetup::default_match()).expect("valid setup");
-        // Sear: accuracy 85 → 0.85, attack role Sniper, name preserved.
+        // Sear: accuracy 85 → 0.85, attack role Finisher, name preserved.
         let sear = agents.iter().find(|a| a.name == "Sear").expect("Sear");
-        assert_eq!(sear.attack_role, InPossessionRole::Sniper);
+        assert_eq!(sear.attack_role, InPossessionRole::Finisher);
         assert_eq!(
             sear.attributes.accuracy,
             Fx::from_num(85) / Fx::from_num(100)

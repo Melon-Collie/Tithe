@@ -64,21 +64,23 @@ fn name_of(names: &[String], id: u32) -> String {
 /// A short human label for an in-possession role.
 fn attack_label(role: InPossessionRole) -> &'static str {
     match role {
-        InPossessionRole::Balanced => "balanced",
-        InPossessionRole::Dangler => "dangler",
+        InPossessionRole::BoxToBox => "box2box",
+        InPossessionRole::Roamer => "roamer",
         InPossessionRole::Playmaker => "playmaker",
-        InPossessionRole::StayAtHome => "stay-home",
-        InPossessionRole::Sniper => "sniper",
-        InPossessionRole::PerimeterShooter => "perimeter",
+        InPossessionRole::Outlet => "outlet",
+        InPossessionRole::Finisher => "finisher",
     }
 }
 
 /// A short human label for an out-of-possession role.
 fn defend_label(role: OutOfPossessionRole) -> &'static str {
     match role {
-        OutOfPossessionRole::Balanced => "balanced",
+        OutOfPossessionRole::Destroyer => "destroyer",
         OutOfPossessionRole::Presser => "presser",
-        OutOfPossessionRole::Anchor => "anchor",
+        OutOfPossessionRole::Warden => "warden",
+        OutOfPossessionRole::Sweeper => "sweeper",
+        OutOfPossessionRole::Cheat => "cheat",
+        OutOfPossessionRole::Tracker => "tracker",
     }
 }
 
