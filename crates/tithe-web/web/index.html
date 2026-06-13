@@ -135,19 +135,35 @@
     }
   }
 
+  // Trace a single pointy-top hexagon (a vertex points up) into the current path.
+  function hexPath(ctx, f, cx, cy, s) {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI / 180 * (60 * i - 30);
+      const X = f.sx(cx + s * Math.cos(a)), Y = f.sy(cy + s * Math.sin(a));
+      if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+    }
+    ctx.closePath();
+  }
+
   // The hex board (§14): faint pointy-top hex outlines at each in-bounds center.
   function drawHexes(ctx, f, board) {
     if (!board) return;
-    const s = board.hex_size;
     ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
-    for (const [cx, cy] of board.hexes) {
-      ctx.beginPath();
-      for (let i = 0; i < 6; i++) {
-        const a = Math.PI / 180 * (60 * i - 30); // pointy-top: a vertex points up
-        const X = f.sx(cx + s * Math.cos(a)), Y = f.sy(cy + s * Math.sin(a));
-        if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
-      }
-      ctx.closePath(); ctx.stroke();
+    for (const [cx, cy] of board.hexes) { hexPath(ctx, f, cx, cy, board.hex_size); ctx.stroke(); }
+  }
+
+  // A role's footprint as filled board hexes: every in-bounds cell inside the
+  // ellipse (half_x × half_y, leaned `lean` toward the enemy goal) around the
+  // anchor. Low alpha so overlapping zones read as a team coverage map (the
+  // brighter a hex, the more players cover it).
+  function drawFootprint(ctx, f, board, cx, cy, hx, hy, fill) {
+    if (!board) return;
+    ctx.fillStyle = fill;
+    for (const [mx, my] of board.hexes) {
+      const nx = (mx - cx) / hx, ny = (my - cy) / hy;
+      if (nx * nx + ny * ny > 1) continue;
+      hexPath(ctx, f, mx, my, board.hex_size); ctx.fill();
     }
   }
 
@@ -158,6 +174,8 @@
   // sim mirrored across x, so we mirror on load and again on export.
   let editTeams = [];
   let phase = 'attack'; // which shape the tabs are editing
+  let META = null;      // board + per-role footprint shapes (for drawing zones)
+  let hoverEd = { team: -1, pi: -1 }; // the editor player under the cursor (highlight its zone)
 
   const boards = [
     { team: 0, canvas: document.getElementById('ed0') },
@@ -187,6 +205,21 @@
 
   function drawBoard(b) {
     drawArena(b.ctx, b.canvas, b.f);
+    drawHexes(b.ctx, b.f, META && META.board);
+    // Footprints first (under the dots): the team's coverage map for this phase.
+    if (META) {
+      const table = phase === 'attack' ? META.attack : META.defend;
+      const fwd = b.team === 0 ? 1 : -1; // enemy goal is +x for team 0, -x for team 1
+      editTeams[b.team].players.forEach((p, i) => {
+        const fp = table[phase === 'attack' ? p.attackRole : p.defendRole];
+        if (!fp) return;
+        const [hx, hy, lean] = fp;
+        const hot = hoverEd.team === b.team && hoverEd.pi === i;
+        const alpha = hot ? 0.22 : 0.05;
+        const c = b.team === 0 ? `232,100,60` : `76,155,232`;
+        drawFootprint(b.ctx, b.f, META.board, p[phase].x + lean * fwd, p[phase].y, hx, hy, `rgba(${c},${alpha})`);
+      });
+    }
     editTeams[b.team].players.forEach((p, i) => {
       const pos = p[phase];
       const px = b.f.sx(pos.x), py = b.f.sy(pos.y);
@@ -283,12 +316,25 @@
       }
     });
     b.canvas.addEventListener('pointermove', e => {
-      if (!drag || drag.board !== b) return;
       const [mx, my] = mousePos(b.canvas, e);
-      const pos = editTeams[b.team].players[drag.pi][phase];
-      pos.x = Math.max(-ARENA.half_x, Math.min(ARENA.half_x, Math.round(b.f.fx(mx))));
-      pos.y = Math.max(-ARENA.half_y, Math.min(ARENA.half_y, Math.round(b.f.fy(my))));
-      drawBoard(b);
+      if (drag && drag.board === b) {
+        const pos = editTeams[b.team].players[drag.pi][phase];
+        pos.x = Math.max(-ARENA.half_x, Math.min(ARENA.half_x, Math.round(b.f.fx(mx))));
+        pos.y = Math.max(-ARENA.half_y, Math.min(ARENA.half_y, Math.round(b.f.fy(my))));
+        drawBoard(b);
+        return;
+      }
+      // Not dragging: highlight the zone of the player under the cursor.
+      const ps = editTeams[b.team].players;
+      let pi = -1;
+      for (let k = 0; k < ps.length; k++) {
+        const dx = b.f.sx(ps[k][phase].x) - mx, dy = b.f.sy(ps[k][phase].y) - my;
+        if (dx*dx + dy*dy <= 13*13) { pi = k; break; }
+      }
+      if (hoverEd.team !== b.team || hoverEd.pi !== pi) { hoverEd = { team: b.team, pi }; drawBoard(b); }
+    });
+    b.canvas.addEventListener('pointerleave', () => {
+      if (hoverEd.team === b.team && hoverEd.pi !== -1) { hoverEd = { team: -1, pi: -1 }; drawBoard(b); }
     });
     b.canvas.addEventListener('pointerup', () => { drag = null; });
   });
@@ -465,8 +511,8 @@
 
   // ---- hover a player → roles + attributes -----------------------------------
   const ptip = document.getElementById('ptip');
-  const ROLE_LABEL = { balanced:'Balanced', dangler:'Dangler', playmaker:'Playmaker', stay_at_home:'Stay-home',
-                       sniper:'Sniper', perimeter_shooter:'Perimeter', presser:'Presser', anchor:'Anchor' };
+  const ROLE_LABEL = { box_to_box:'Box-to-box', roamer:'Roamer', playmaker:'Playmaker', outlet:'Outlet', finisher:'Finisher',
+                       destroyer:'Destroyer', presser:'Presser', warden:'Warden', sweeper:'Sweeper', cheat:'Cheat', tracker:'Tracker' };
   function tipHtml(m) {
     const a = m.attrs;
     const lbl = r => ROLE_LABEL[r] || r;
@@ -496,7 +542,11 @@
   });
   vc.addEventListener('mouseleave', () => { ptip.style.display = 'none'; });
 
-  loadDefault();
+  // Fetch the static draw data (board + footprint shapes) once, then the setup.
+  (async () => {
+    try { META = await (await fetch('/api/meta')).json(); } catch (_) { META = null; }
+    await loadDefault();
+  })();
   requestAnimationFrame(loop);
   </script>
 </body>

@@ -18,8 +18,10 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use tithe_sim::{
-    Event, InPossessionRole, MatchSetup, OutOfPossessionRole, Possession, Simulation, Vec2,
+    Board, Event, InPossessionRole, MatchSetup, OutOfPossessionRole, Possession, SimConfig,
+    Simulation, Vec2,
 };
 
 /// The single-page UI (formation editor + playback viewer), served at `/`.
@@ -33,6 +35,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index))
         .route("/api/default-setup", get(default_setup))
+        .route("/api/meta", get(meta))
         .route("/api/run", post(run_match));
 
     let addr = "127.0.0.1:8770";
@@ -50,6 +53,69 @@ async fn index() -> Html<&'static str> {
 /// The editable starting point: the same authored example as `tithe init`.
 async fn default_setup() -> Json<MatchSetup> {
     Json(MatchSetup::default_match())
+}
+
+/// Static view data the editor needs to *draw* (not part of the wire setup): the
+/// hex board and the per-role footprint shapes (§14), so the editor can render
+/// each player's zone. Read straight off [`SimConfig::default`] — the sim stays
+/// the source of truth for the shapes.
+#[derive(Serialize)]
+struct Meta {
+    arena: Arena,
+    board: BoardExport,
+    /// In-possession role → `[half_x, half_y, lean]`, keyed by the role's
+    /// serde name (snake_case) so the editor can look it up by the same string.
+    attack: BTreeMap<String, [f32; 3]>,
+    /// Out-of-possession role → `[half_x, half_y, lean]`.
+    defend: BTreeMap<String, [f32; 3]>,
+}
+
+async fn meta() -> Json<Meta> {
+    let cfg = SimConfig::default();
+    let board = Board::oval(cfg.hex_size, cfg.arena_half_x, cfg.arena_half_y);
+    let fp = |f: tithe_sim::world::Footprint| {
+        [
+            f.half_x.to_num::<f32>(),
+            f.half_y.to_num::<f32>(),
+            f.lean.to_num::<f32>(),
+        ]
+    };
+    // Keys must match the enums' serde rename (snake_case) — the same strings the
+    // roster dropdowns and AgentMeta use.
+    let mut attack = BTreeMap::new();
+    for (key, role) in [
+        ("box_to_box", InPossessionRole::BoxToBox),
+        ("roamer", InPossessionRole::Roamer),
+        ("playmaker", InPossessionRole::Playmaker),
+        ("outlet", InPossessionRole::Outlet),
+        ("finisher", InPossessionRole::Finisher),
+    ] {
+        attack.insert(key.to_string(), fp(cfg.on_ball_bias(role).footprint));
+    }
+    let mut defend = BTreeMap::new();
+    for (key, role) in [
+        ("destroyer", OutOfPossessionRole::Destroyer),
+        ("presser", OutOfPossessionRole::Presser),
+        ("warden", OutOfPossessionRole::Warden),
+        ("sweeper", OutOfPossessionRole::Sweeper),
+        ("cheat", OutOfPossessionRole::Cheat),
+        ("tracker", OutOfPossessionRole::Tracker),
+    ] {
+        defend.insert(key.to_string(), fp(cfg.defense_bias(role).footprint));
+    }
+    Json(Meta {
+        arena: Arena {
+            half_x: cfg.arena_half_x.to_num(),
+            half_y: cfg.arena_half_y.to_num(),
+            goal_x: cfg.goal_x.to_num(),
+        },
+        board: BoardExport {
+            hex_size: cfg.hex_size.to_num(),
+            hexes: board.cells().iter().map(|&h| xy(board.center(h))).collect(),
+        },
+        attack,
+        defend,
+    })
 }
 
 /// Body of `POST /api/run`: an authored matchup plus the run parameters.
