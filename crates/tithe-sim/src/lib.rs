@@ -37,6 +37,7 @@
 // would legitimately use floats, so these are not workspace-wide).
 #![deny(clippy::float_arithmetic, clippy::float_cmp)]
 
+pub mod boxscore;
 pub mod decide;
 pub mod event;
 pub mod fx;
@@ -46,12 +47,13 @@ pub mod setup;
 pub mod value;
 pub mod world;
 
+pub use boxscore::{BoxScore, PlayerLine};
 pub use decide::Intent;
 pub use event::Event;
 pub use fx::{Fx, Vec2, WideFx};
 pub use hex::{Board, Hex};
 pub use rng::Rng;
-pub use setup::{MatchSetup, SetupError};
+pub use setup::{MatchSetup, PlayerSetup, SetupError};
 pub use world::{Agent, Formation, Possession, SimConfig, Soul};
 pub use world::{InPossessionRole, OutOfPossessionRole};
 

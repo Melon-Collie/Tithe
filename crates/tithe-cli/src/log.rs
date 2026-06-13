@@ -62,7 +62,7 @@ fn name_of(names: &[String], id: u32) -> String {
 }
 
 /// A short human label for an in-possession role.
-fn attack_label(role: InPossessionRole) -> &'static str {
+pub(crate) fn attack_label(role: InPossessionRole) -> &'static str {
     match role {
         InPossessionRole::BoxToBox => "box2box",
         InPossessionRole::Roamer => "roamer",
@@ -73,7 +73,7 @@ fn attack_label(role: InPossessionRole) -> &'static str {
 }
 
 /// A short human label for an out-of-possession role.
-fn defend_label(role: OutOfPossessionRole) -> &'static str {
+pub(crate) fn defend_label(role: OutOfPossessionRole) -> &'static str {
     match role {
         OutOfPossessionRole::Destroyer => "destroyer",
         OutOfPossessionRole::Presser => "presser",

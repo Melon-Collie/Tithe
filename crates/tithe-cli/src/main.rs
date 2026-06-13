@@ -8,19 +8,23 @@
 //! - `stats` — run a batch of AI-vs-AI matches and print tuning metrics. The
 //!   "do the numbers work" test (the doc's stated tuning method).
 //! - `log` — print a narrated play-by-play of one match.
+//! - `box` — print the per-player box score for one match.
+//! - `validate` — a controlled A/B that confirms one attribute *bites*.
 //! - `init` — write an editable example match-setup file (the coach-input
 //!   boundary), the stand-in for the game's roster/tactics screens.
 //!
-//! `play`/`stats`/`log` accept `--setup FILE` to run an authored matchup instead
-//! of the default RNG-rolled teams.
+//! `play`/`stats`/`log`/`box` accept `--setup FILE` to run an authored matchup
+//! instead of the default RNG-rolled teams.
 //!
 //! Floats and serialization live here at the render boundary — never in
 //! `tithe-sim`.
 
+mod boxscore;
 mod init;
 mod log;
 mod replay;
 mod stats;
+mod validate;
 
 use tithe_sim::{MatchSetup, Simulation};
 
@@ -30,13 +34,19 @@ fn main() {
         Some("play") => replay::run(&args[2..]),
         Some("stats") => stats::run(&args[2..]),
         Some("log") => log::run(&args[2..]),
+        Some("box") => boxscore::run(&args[2..]),
+        Some("validate") => validate::run(&args[2..]),
         Some("init") => init::run(&args[2..]),
         _ => {
             eprintln!("usage:");
-            eprintln!("  tithe play  [--seed N] [--out FILE] [--max-ticks N] [--setup FILE]");
-            eprintln!("  tithe stats [--matches N] [--seed N] [--setup FILE]");
-            eprintln!("  tithe log   [--seed N] [--max-ticks N] [--setup FILE]");
-            eprintln!("  tithe init  [--out FILE]   # write an editable example setup");
+            eprintln!("  tithe play     [--seed N] [--out FILE] [--max-ticks N] [--setup FILE]");
+            eprintln!("  tithe stats    [--matches N] [--seed N] [--setup FILE]");
+            eprintln!("  tithe log      [--seed N] [--max-ticks N] [--setup FILE]");
+            eprintln!("  tithe box      [--seed N] [--max-ticks N] [--setup FILE]");
+            eprintln!(
+                "  tithe validate --attr <name> [--hi N --lo N --baseline N --matches N --seed N]"
+            );
+            eprintln!("  tithe init     [--out FILE]   # write an editable example setup");
             std::process::exit(2);
         }
     }
