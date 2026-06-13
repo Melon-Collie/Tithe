@@ -135,6 +135,22 @@
     }
   }
 
+  // The hex board (§14): faint pointy-top hex outlines at each in-bounds center.
+  function drawHexes(ctx, f, board) {
+    if (!board) return;
+    const s = board.hex_size;
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
+    for (const [cx, cy] of board.hexes) {
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = Math.PI / 180 * (60 * i - 30); // pointy-top: a vertex points up
+        const X = f.sx(cx + s * Math.cos(a)), Y = f.sy(cy + s * Math.sin(a));
+        if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+      }
+      ctx.closePath(); ctx.stroke();
+    }
+  }
+
   // ---- editor state ----------------------------------------------------------
   // editTeams[t] = { name, players:[{ name, attackRole, defendRole, acc, rng, hand, strip, cont, pass,
   //                                   attack:{x,y}, defend:{x,y} }] }
@@ -369,6 +385,7 @@
 
   function drawViewer(fr) {
     drawArena(vctx, vc, vF);
+    drawHexes(vctx, vF, MATCH.board);
     const meta = MATCH.agents, frames = MATCH.frames;
     // Soul trail: a fading tail of recent positions.
     vctx.strokeStyle = 'rgba(255,216,74,0.35)'; vctx.lineWidth = 2; vctx.beginPath();

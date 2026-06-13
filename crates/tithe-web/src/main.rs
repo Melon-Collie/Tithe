@@ -74,11 +74,19 @@ async fn run_match(Json(req): Json<RunRequest>) -> Result<Json<MatchExport>, (St
 #[derive(Serialize)]
 struct MatchExport {
     arena: Arena,
+    board: BoardExport,
     souls_to_win: u32,
     agents: Vec<AgentMeta>,
     frames: Vec<Frame>,
     events: Vec<MatchEvent>,
     winner: Option<u8>,
+}
+
+/// The hex board for the viewer (§14): hex size + the in-bounds cell centers.
+#[derive(Serialize)]
+struct BoardExport {
+    hex_size: f32,
+    hexes: Vec<[f32; 2]>,
 }
 
 /// A narrated play-by-play line, tagged with its tick (for syncing to playback),
@@ -169,6 +177,16 @@ fn build_export(
     };
     let souls_to_win = cfg.souls_to_win;
     let goals = sim.config().goals();
+
+    let hex_board = sim.board();
+    let board = BoardExport {
+        hex_size: hex_board.size().to_num(),
+        hexes: hex_board
+            .cells()
+            .iter()
+            .map(|&h| xy(hex_board.center(h)))
+            .collect(),
+    };
 
     let names: Vec<String> = sim.agents().iter().map(|a| a.name.clone()).collect();
     let agent_teams: Vec<u8> = sim.agents().iter().map(|a| a.team).collect();
@@ -269,6 +287,7 @@ fn build_export(
 
     Ok(MatchExport {
         arena,
+        board,
         souls_to_win,
         agents,
         frames,

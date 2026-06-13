@@ -24,6 +24,9 @@ pub struct SimConfig {
     pub arena_half_x: Fx,
     /// Half-height of the arena (y half-extent).
     pub arena_half_y: Fx,
+    /// Hex size (center-to-vertex) of the board grid (§14 redesign). The oval
+    /// board is the hexes of this size inside the `arena_half_*` ellipse.
+    pub hex_size: Fx,
     /// How close an agent must get to a loose soul to claim it.
     pub pickup_radius: Fx,
     /// Farthest a player will chase a loose soul (even its team's nearest holds
@@ -149,6 +152,8 @@ impl Default for SimConfig {
             max_speed: Fx::from_num(2),
             arena_half_x: Fx::from_num(50),
             arena_half_y: Fx::from_num(30),
+            hex_size: Fx::from_num(4), // ~14 hexes across × ~10 tall, oval-clipped
+
             pickup_radius: Fx::from_num(2),
             chase_max_dist: Fx::from_num(120),
             goal_x: Fx::from_num(45),

@@ -40,6 +40,7 @@
 pub mod decide;
 pub mod event;
 pub mod fx;
+pub mod hex;
 pub mod rng;
 pub mod setup;
 pub mod value;
@@ -48,6 +49,7 @@ pub mod world;
 pub use decide::Intent;
 pub use event::Event;
 pub use fx::{Fx, Vec2, WideFx};
+pub use hex::{Board, Hex};
 pub use rng::Rng;
 pub use setup::{MatchSetup, SetupError};
 pub use world::{Agent, Formation, Possession, SimConfig, Soul};
@@ -169,6 +171,16 @@ impl Simulation {
     /// geometry, e.g. a renderer).
     pub fn config(&self) -> &SimConfig {
         &self.config
+    }
+
+    /// The hex board (oval-clipped grid) this match plays on — for renderers and
+    /// (in the redesign) footprint placement. Derived from the arena + hex size.
+    pub fn board(&self) -> Board {
+        Board::oval(
+            self.config.hex_size,
+            self.config.arena_half_x,
+            self.config.arena_half_y,
+        )
     }
 
     /// Advance one fixed timestep, returning the events emitted this tick.
