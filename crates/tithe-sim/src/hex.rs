@@ -45,6 +45,11 @@ impl Hex {
     pub fn neighbors(self) -> [Hex; 6] {
         DIRECTIONS.map(|(dq, dr)| Hex::new(self.q + dq, self.r + dr))
     }
+
+    /// This hex's field center for the given hex `size` (center-to-vertex).
+    pub fn center(self, size: Fx) -> Vec2 {
+        center_of(size, self)
+    }
 }
 
 /// The pixel/field center of a hex, given the hex `size` (center-to-vertex).

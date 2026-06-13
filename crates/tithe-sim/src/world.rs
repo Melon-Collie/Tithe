@@ -232,7 +232,10 @@ impl Default for SimConfig {
             separation_step: Fx::from_num(1),
             // In-possession role table (§14). Tendency: carry/pass/shoot in %,
             // shoot gate in % score-chance. Footprint: half_x × half_y (field
-            // units) + forward lean. Edit a row to change how a role plays.
+            // units) + forward lean. NOTE: x is the goal-to-goal (play) axis —
+            // the arena's long axis — and y is across the field. So half_x > half_y
+            // is a lane *along* the field; half_y > half_x is a band *across* it.
+            // Edit a row to change how a role plays.
             role_biases: {
                 let bias =
                     |carry: u32, pass: u32, shoot: u32, gate: u32, hx: u32, hy: u32| OnBallBias {
@@ -248,8 +251,8 @@ impl Default for SimConfig {
                     };
                 RoleBiases {
                     //                  carry pass shoot gate  hx  hy   shape
-                    box_to_box: bias(110, 100, 90, 0, 6, 16), // tall/narrow
-                    roamer: bias(100, 100, 90, 0, 16, 6),     // wide/flat
+                    box_to_box: bias(110, 100, 90, 0, 16, 6), // long lane along the field
+                    roamer: bias(100, 100, 90, 0, 6, 16),     // wide flat band across
                     playmaker: bias(90, 140, 80, 0, 9, 9),    // compact
                     outlet: bias(40, 130, 70, 0, 8, 8),       // compact, recycles
                     finisher: bias(90, 90, 140, 0, 9, 9),     // shell, shoots
@@ -273,9 +276,9 @@ impl Default for SimConfig {
                     destroyer: def(100, 0, 6, 6, 0), // tiny, trigger-happy
                     presser: def(160, 0, 8, 8, 10),  // forward-leaning, aggressive
                     warden: def(80, 35, 16, 14, 0),  // large, patient
-                    sweeper: def(60, 40, 18, 6, 0),  // wide band, last line
+                    sweeper: def(60, 40, 6, 18, 0),  // wide band across the last line
                     cheat: def(0, 90, 8, 8, 0),      // no challenge; offensive positioning
-                    tracker: def(100, 20, 6, 16, 0), // tall lane
+                    tracker: def(100, 20, 16, 6, 0), // long lane along the field
                 }
             },
         }

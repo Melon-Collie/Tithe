@@ -109,10 +109,7 @@ async fn meta() -> Json<Meta> {
             half_y: cfg.arena_half_y.to_num(),
             goal_x: cfg.goal_x.to_num(),
         },
-        board: BoardExport {
-            hex_size: cfg.hex_size.to_num(),
-            hexes: board.cells().iter().map(|&h| xy(board.center(h))).collect(),
-        },
+        board: board_export(&board),
         attack,
         defend,
     })
@@ -148,11 +145,40 @@ struct MatchExport {
     winner: Option<u8>,
 }
 
-/// The hex board for the viewer (§14): hex size + the in-bounds cell centers.
+/// The hex board for the viewer/editor (§14): hex size + the in-bounds cells,
+/// each as its axial coords and field center (the editor places players by hex).
 #[derive(Serialize)]
 struct BoardExport {
     hex_size: f32,
-    hexes: Vec<[f32; 2]>,
+    hexes: Vec<HexCell>,
+}
+
+#[derive(Serialize)]
+struct HexCell {
+    q: i32,
+    r: i32,
+    x: f32,
+    y: f32,
+}
+
+/// Build the board export from a [`Board`] (shared by the viewer and the editor).
+fn board_export(board: &Board) -> BoardExport {
+    BoardExport {
+        hex_size: board.size().to_num(),
+        hexes: board
+            .cells()
+            .iter()
+            .map(|&h| {
+                let c = board.center(h);
+                HexCell {
+                    q: h.q,
+                    r: h.r,
+                    x: c.x.to_num(),
+                    y: c.y.to_num(),
+                }
+            })
+            .collect(),
+    }
 }
 
 /// A narrated play-by-play line, tagged with its tick (for syncing to playback),
@@ -244,15 +270,7 @@ fn build_export(
     let souls_to_win = cfg.souls_to_win;
     let goals = sim.config().goals();
 
-    let hex_board = sim.board();
-    let board = BoardExport {
-        hex_size: hex_board.size().to_num(),
-        hexes: hex_board
-            .cells()
-            .iter()
-            .map(|&h| xy(hex_board.center(h)))
-            .collect(),
-    };
+    let board = board_export(&sim.board());
 
     let names: Vec<String> = sim.agents().iter().map(|a| a.name.clone()).collect();
     let agent_teams: Vec<u8> = sim.agents().iter().map(|a| a.team).collect();

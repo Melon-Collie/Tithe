@@ -135,6 +135,23 @@
     }
   }
 
+  // Axial-hex helpers (must match the sim: pointy-top, √3 truncated to 1.7320).
+  const SQRT3 = 1.7320;
+  function hexCenter(q, r) { const s = (META && META.board ? META.board.hex_size : 4); return { x: s*SQRT3*(q + r/2), y: s*1.5*r }; }
+  const mirrorHex = (q, r) => [-q - r, r]; // reflect a hex across x=0 (its own inverse)
+
+  // The in-bounds board hex nearest a field point — players snap onto it. Returns
+  // {q, r, x, y}. Falls back to a computed hex if the board hasn't loaded yet.
+  function nearestHex(x, y) {
+    if (!META || !META.board) return { q: 0, r: 0, x: Math.round(x), y: Math.round(y) };
+    let best = META.board.hexes[0], bd = Infinity;
+    for (const h of META.board.hexes) {
+      const dx = h.x - x, dy = h.y - y, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = h; }
+    }
+    return { q: best.q, r: best.r, x: best.x, y: best.y };
+  }
+
   // Trace a single pointy-top hexagon (a vertex points up) into the current path.
   function hexPath(ctx, f, cx, cy, s) {
     ctx.beginPath();
@@ -150,7 +167,7 @@
   function drawHexes(ctx, f, board) {
     if (!board) return;
     ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
-    for (const [cx, cy] of board.hexes) { hexPath(ctx, f, cx, cy, board.hex_size); ctx.stroke(); }
+    for (const h of board.hexes) { hexPath(ctx, f, h.x, h.y, board.hex_size); ctx.stroke(); }
   }
 
   // A role's footprint as filled board hexes: every in-bounds cell inside the
@@ -160,18 +177,19 @@
   function drawFootprint(ctx, f, board, cx, cy, hx, hy, fill) {
     if (!board) return;
     ctx.fillStyle = fill;
-    for (const [mx, my] of board.hexes) {
-      const nx = (mx - cx) / hx, ny = (my - cy) / hy;
+    for (const h of board.hexes) {
+      const nx = (h.x - cx) / hx, ny = (h.y - cy) / hy;
       if (nx * nx + ny * ny > 1) continue;
-      hexPath(ctx, f, mx, my, board.hex_size); ctx.fill();
+      hexPath(ctx, f, h.x, h.y, board.hex_size); ctx.fill();
     }
   }
 
   // ---- editor state ----------------------------------------------------------
-  // editTeams[t] = { name, players:[{ name, attackRole, defendRole, acc, rng, hand, strip, cont, pass,
-  //                                   attack:{x,y}, defend:{x,y} }] }
-  // Positions are absolute field coords (what's drawn). Team 1 is stored in the
-  // sim mirrored across x, so we mirror on load and again on export.
+  // editTeams[t] = { name, players:[{ name, attackRole, defendRole, ...attrs,
+  //                                   attack:{q,r,x,y}, defend:{q,r,x,y} }] }
+  // Anchors are board hexes: {q,r} is the cell, {x,y} its field center (what's
+  // drawn). Stored in absolute (display) coords; team 1 mirrors to/from the
+  // team-0 frame on load/export, since the sim mirrors team 1 across x.
   let editTeams = [];
   let phase = 'attack'; // which shape the tabs are editing
   let META = null;      // board + per-role footprint shapes (for drawing zones)
@@ -188,14 +206,20 @@
     editTeams = setup.teams.map((team, t) => {
       const A = setup.formations[team.attack_formation].slots;
       const D = setup.formations[team.defend_formation].slots;
-      const mir = slot => ({ x: t === 0 ? slot[0] : -slot[0], y: slot[1] });
+      // Slots are team-0-frame hexes [q,r]; team 1 mirrors across x. Resolve each
+      // to an absolute {q,r,x,y} the editor draws and drags.
+      const toAbs = qr => {
+        const [q, r] = t === 0 ? [qr[0], qr[1]] : mirrorHex(qr[0], qr[1]);
+        const c = hexCenter(q, r);
+        return { q, r, x: c.x, y: c.y };
+      };
       document.getElementById('name' + t).textContent = team.name;
       return {
         name: team.name,
         players: team.players.map((p, i) => ({
           name: p.name, attackRole: p.attack_role, defendRole: p.defend_role,
           acc: p.accuracy, rng: p.range, hand: p.handling, strip: p.stripping, cont: p.contesting, pass: p.passing, pos: p.positioning, pace: p.pace, awr: p.awareness,
-          attack: mir(A[i]), defend: mir(D[i]),
+          attack: toAbs(A[i]), defend: toAbs(D[i]),
         })),
       };
     });
@@ -301,9 +325,13 @@
 
   // ---- dragging (per board) --------------------------------------------------
   let drag = null; // { board, pi }
+  // Map a pointer event to canvas-internal pixels. Scale by width/rect.width so
+  // it stays correct when CSS displays the canvas at a different size than its
+  // intrinsic resolution (browser zoom, OS display scaling, a flex-squished row).
   function mousePos(canvas, e) {
     const r = canvas.getBoundingClientRect();
-    return [e.clientX - r.left, e.clientY - r.top];
+    return [(e.clientX - r.left) * (canvas.width / r.width),
+            (e.clientY - r.top) * (canvas.height / r.height)];
   }
   boards.forEach(b => {
     b.canvas.addEventListener('pointerdown', e => {
@@ -319,8 +347,8 @@
       const [mx, my] = mousePos(b.canvas, e);
       if (drag && drag.board === b) {
         const pos = editTeams[b.team].players[drag.pi][phase];
-        pos.x = Math.max(-ARENA.half_x, Math.min(ARENA.half_x, Math.round(b.f.fx(mx))));
-        pos.y = Math.max(-ARENA.half_y, Math.min(ARENA.half_y, Math.round(b.f.fy(my))));
+        const h = nearestHex(b.f.fx(mx), b.f.fy(my)); // snap the anchor onto a hex
+        pos.x = h.x; pos.y = h.y;
         drawBoard(b);
         return;
       }
@@ -344,8 +372,9 @@
     const formations = {};
     const teams = editTeams.map((team, t) => {
       const an = `t${t}_attack`, dn = `t${t}_defend`;
-      // Team 1 is mirrored by the sim, so store its anchors mirrored back.
-      const back = pos => [Math.round(t === 0 ? pos.x : -pos.x), Math.round(pos.y)];
+      // Slots are team-0-frame hexes; team 1 is mirrored by the sim, so store its
+      // anchors mirrored back to that frame (mirrorHex is its own inverse).
+      const back = cell => (t === 0 ? [cell.q, cell.r] : mirrorHex(cell.q, cell.r));
       formations[an] = { slots: team.players.map(p => back(p.attack)) };
       formations[dn] = { slots: team.players.map(p => back(p.defend)) };
       return {
@@ -525,7 +554,7 @@
   vc.addEventListener('mousemove', e => {
     if (!MATCH) { ptip.style.display = 'none'; return; }
     const r = vc.getBoundingClientRect();
-    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const mx = (e.clientX - r.left) * (vc.width / r.width), my = (e.clientY - r.top) * (vc.height / r.height);
     const fr = MATCH.frames[idx];
     let hit = -1, best = 13 * 13;
     for (let i = 0; i < fr.agents.length; i++) {

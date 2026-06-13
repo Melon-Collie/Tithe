@@ -991,8 +991,9 @@ mod tests {
         assert!(sweeper.lunge_min_prob > Fx::from_num(0));
         // Cheat never breaks shape to challenge.
         assert_eq!(cheat.contest_range_mult, Fx::from_num(0));
-        // Aspect grammar: Sweeper is wide/flat, Tracker is tall/narrow.
-        assert!(sweeper.footprint.half_x > sweeper.footprint.half_y);
-        assert!(tracker.footprint.half_y > tracker.footprint.half_x);
+        // Aspect grammar (x = along the field, y = across): Sweeper is a wide band
+        // across the last line; Tracker is a long lane along the field.
+        assert!(sweeper.footprint.half_y > sweeper.footprint.half_x);
+        assert!(tracker.footprint.half_x > tracker.footprint.half_y);
     }
 }

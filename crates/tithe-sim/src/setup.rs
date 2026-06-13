@@ -25,7 +25,8 @@
 //! [`SimConfig::default`]: crate::SimConfig
 
 use crate::fx::{Fx, Vec2};
-use crate::world::{Agent, Attributes, InPossessionRole, OutOfPossessionRole};
+use crate::hex::Hex;
+use crate::world::{Agent, Attributes, InPossessionRole, OutOfPossessionRole, SimConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -46,7 +47,8 @@ pub struct MatchSetup {
 /// mirrored across x, so one named shape serves either side symmetrically.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormationSpec {
-    /// One `[x, y]` anchor per slot. Integer units (the arena spans ±50 × ±30).
+    /// One axial **hex** `[q, r]` per slot — the board cell the player anchors on
+    /// (§14; players live on the grid). It resolves to that hex's field center.
     pub slots: Vec<[i32; 2]>,
 }
 
@@ -189,9 +191,10 @@ pub fn build_agents(setup: &MatchSetup) -> Result<Vec<Agent>, SetupError> {
         check_slot_count(team, &team.attack_formation, attack)?;
         check_slot_count(team, &team.defend_formation, defend)?;
 
+        let hex_size = SimConfig::default().hex_size;
         for (i, player) in team.players.iter().enumerate() {
-            let attack_anchor = anchor_for(team_idx, &attack.slots[i]);
-            let defend_anchor = anchor_for(team_idx, &defend.slots[i]);
+            let attack_anchor = anchor_for(team_idx, &attack.slots[i], hex_size);
+            let defend_anchor = anchor_for(team_idx, &defend.slots[i], hex_size);
             let attributes = player.to_attributes()?;
             let id = agents.len() as u32;
             agents.push(Agent {
@@ -243,15 +246,16 @@ fn check_slot_count(team: &TeamSetup, name: &str, spec: &FormationSpec) -> Resul
     Ok(())
 }
 
-/// A slot's anchor in absolute field coordinates: team 0 as authored, team 1
-/// mirrored across x (so a single template serves either side).
-fn anchor_for(team_idx: usize, slot: &[i32; 2]) -> Vec2 {
-    let x = Fx::from_num(slot[0]);
-    let y = Fx::from_num(slot[1]);
+/// A slot's anchor in absolute field coordinates. A slot is an axial **hex**
+/// `[q, r]` (§14 — players live on the grid); it resolves to that hex's center.
+/// Team 0 as authored; team 1 is mirrored across x (negating the center's x is
+/// exactly the mirror hex's center), so one template serves either side.
+fn anchor_for(team_idx: usize, slot: &[i32; 2], hex_size: Fx) -> Vec2 {
+    let center = Hex::new(slot[0], slot[1]).center(hex_size);
     if team_idx == 0 {
-        Vec2::new(x, y)
+        center
     } else {
-        Vec2::new(-x, y)
+        Vec2::new(-center.x, center.y)
     }
 }
 
@@ -268,17 +272,18 @@ impl MatchSetup {
         let mut formations = BTreeMap::new();
         // In-possession: slide toward -x (own goal) to offer — finisher parked
         // at the scoring spot, pressers up as support, anchor stepped up.
+        // Slots are axial hexes [q, r] (§14).
         formations.insert(
             "high-push".to_string(),
             FormationSpec {
                 slots: vec![
-                    [20, 0],    // 0 anchor (deepest safety, steps up)
-                    [-10, -14], // 1 rover
-                    [-8, 14],   // 2 playmaker (outlet)
-                    [-10, 0],   // 3 rover
-                    [8, -16],   // 4 presser (wide support)
-                    [-38, 0],   // 5 finisher (at the offering spot)
-                    [8, 16],    // 6 presser (wide support)
+                    [3, 0],  // 0 anchor (deepest safety, steps up)
+                    [0, -2], // 1 rover
+                    [-2, 2], // 2 playmaker (outlet)
+                    [-1, 0], // 3 rover
+                    [3, -3], // 4 presser (wide support)
+                    [-5, 0], // 5 finisher (at the offering spot)
+                    [0, 3],  // 6 presser (wide support)
                 ],
             },
         );
@@ -288,13 +293,13 @@ impl MatchSetup {
             "low-block".to_string(),
             FormationSpec {
                 slots: vec![
-                    [38, 0],   // 0 anchor (last line at the defended goal)
-                    [18, -14], // 1 rover
-                    [10, 14],  // 2 playmaker
-                    [18, 0],   // 3 rover
-                    [30, -16], // 4 presser (harries the buildup)
-                    [-5, 0],   // 5 finisher (stays high, ready to counter)
-                    [30, 16],  // 6 presser
+                    [5, 0],  // 0 anchor (last line at the defended goal)
+                    [4, -2], // 1 rover
+                    [0, 2],  // 2 playmaker
+                    [3, 0],  // 3 rover
+                    [6, -3], // 4 presser (harries the buildup)
+                    [-1, 0], // 5 finisher (stays high, ready to counter)
+                    [3, 3],  // 6 presser
                 ],
             },
         );
@@ -472,16 +477,18 @@ mod tests {
     #[test]
     fn each_player_gets_both_phase_anchors_team_one_mirrored() {
         let agents = build_agents(&MatchSetup::default_match()).expect("valid setup");
-        let v = |x: i32, y: i32| Vec2::new(Fx::from_num(x), Fx::from_num(y));
-        // Slot 0 (anchor): attack high-push [20,0], defend low-block [38,0].
-        assert_eq!(agents[0].attack_anchor, v(20, 0));
-        assert_eq!(agents[0].defend_anchor, v(38, 0));
+        let size = SimConfig::default().hex_size;
+        let c = |q, r| Hex::new(q, r).center(size);
+        let mir = |v: Vec2| Vec2::new(-v.x, v.y);
+        // Slot 0 (anchor): attack high-push hex [3,0], defend low-block hex [5,0].
+        assert_eq!(agents[0].attack_anchor, c(3, 0));
+        assert_eq!(agents[0].defend_anchor, c(5, 0));
         // Agents start on the defending anchor (faceoff soul is loose).
-        assert_eq!(agents[0].anchor, v(38, 0));
+        assert_eq!(agents[0].anchor, c(5, 0));
         // Team 1's slot 0 mirrors both phases across x.
-        assert_eq!(agents[7].attack_anchor, v(-20, 0));
-        assert_eq!(agents[7].defend_anchor, v(-38, 0));
-        assert_eq!(agents[7].anchor, v(-38, 0));
+        assert_eq!(agents[7].attack_anchor, mir(c(3, 0)));
+        assert_eq!(agents[7].defend_anchor, mir(c(5, 0)));
+        assert_eq!(agents[7].anchor, mir(c(5, 0)));
     }
 
     #[test]
