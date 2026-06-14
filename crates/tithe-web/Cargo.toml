@@ -23,5 +23,5 @@ serde = { version = "1", features = ["derive"] }
 # Minimal local HTTP server. axum/tokio are the de-facto standard async Rust web
 # stack; this server is a swappable transport — the browser UI moves to WASM
 # (tithe-wasm) / Tauri later untouched.
-axum = "0.7"
+axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
