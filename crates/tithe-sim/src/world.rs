@@ -96,8 +96,19 @@ pub struct SimConfig {
     pub pressure_radius: Fx,
     /// Enemy-count (distance-weighted) that fully smothers a spot's openness.
     pub pressure_max: Fx,
-    /// Perpendicular distance within which a defender blocks a pass lane.
+    /// Perpendicular distance within which a defender blocks a pass lane (cuts
+    /// the completion estimate).
     pub lane_radius: Fx,
+    /// Perpendicular distance within which a defender can *pick off* a pass whose
+    /// completion roll failed — wider than `lane_radius` (he reads a bad ball from
+    /// a step away). A failed roll with no defender this close still reaches the
+    /// receiver (a genuinely open lane), so only contested passes get picked.
+    pub intercept_lane_radius: Fx,
+    /// Floor on the interception "read" — the pick chance for a Positioning-0
+    /// defender who's downfield in the lane (rises to 1 at Positioning 1). Keeps
+    /// picks common enough that Passing still bites while making Positioning the
+    /// read skill: `read = floor + (1 − floor)·Positioning`.
+    pub intercept_read_floor: Fx,
     /// Distance from the in-flight soul's path within which an enemy picks it off.
     pub intercept_radius: Fx,
     /// Stamina lost per tick just by being on the field (active).
@@ -226,6 +237,8 @@ impl Default for SimConfig {
             pressure_radius: Fx::from_num(12),
             pressure_max: Fx::from_num(2),
             lane_radius: Fx::from_num(4),
+            intercept_lane_radius: Fx::from_num(9), // ~2 hexes — a defender reads a bad pass
+            intercept_read_floor: Fx::from_num(5) / Fx::from_num(10), // 0.5 — picks common, Positioning swings them
             intercept_radius: Fx::from_num(3),
             stamina_drain_base: Fx::from_num(5) / Fx::from_num(10000), // 0.0005
             stamina_drain_per_unit: Fx::from_num(25) / Fx::from_num(10000), // 0.0025
