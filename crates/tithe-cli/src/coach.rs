@@ -14,15 +14,13 @@
 use std::collections::BTreeMap;
 use tithe_sim::setup::{FormationSpec, TeamSetup};
 use tithe_sim::{
-    InPossessionRole as IP, MatchSetup, OutOfPossessionRole as OP, PlayerSetup, Rng, Simulation,
+    Attribute, InPossessionRole as IP, MatchSetup, OutOfPossessionRole as OP, PlayerSetup, Rng,
+    Simulation,
 };
 
-/// Attribute order used throughout: acc, rng, han, str, con, pas, pos, pace, awr.
-const ATTR_NAMES: [&str; 9] = [
-    "Acc", "Rng", "Han", "Str", "Con", "Pas", "Pos", "Pace", "Awr",
-];
-
-/// A player the GM hands the coach.
+/// A player the GM hands the coach. `attrs` is indexed by [`Attribute`] in its
+/// canonical order (`attrs[Attribute::Handling as usize]`); the sim owns that
+/// ordering, so this tool can't drift from it.
 struct Player {
     name: String,
     attrs: [u8; 9],
@@ -91,28 +89,39 @@ fn templates() -> Vec<Template> {
     ]
 }
 
-/// What an in-possession role leans on (weights over the attribute order).
+/// Build a want-vector from named weights (any attribute left out is 0).
+/// Keying by [`Attribute`] instead of writing bare positional literals means a
+/// reorder of the attribute set can't silently misalign a role's priorities.
+fn want(pairs: &[(Attribute, f64)]) -> [f64; 9] {
+    let mut w = [0.0; 9];
+    for &(a, v) in pairs {
+        w[a as usize] = v;
+    }
+    w
+}
+
+/// What an in-possession role leans on (weights over the attributes).
 fn attack_want(r: IP) -> [f64; 9] {
-    //               acc rng han str con pas pos pace awr
+    use Attribute::*;
     match r {
-        IP::BoxToBox => [0., 0., 2., 0., 1., 1., 0., 2., 0.],
-        IP::Roamer => [0., 0., 2., 1., 0., 0., 0., 2., 0.],
-        IP::Playmaker => [0., 0., 0., 0., 0., 3., 1., 0., 2.],
-        IP::Outlet => [0., 0., 2., 0., 0., 2., 1., 0., 0.],
-        IP::Finisher => [3., 2., 0., 0., 0., 0., 0., 1., 0.],
+        IP::BoxToBox => want(&[(Handling, 2.), (Contesting, 1.), (Passing, 1.), (Pace, 2.)]),
+        IP::Roamer => want(&[(Handling, 2.), (Stripping, 1.), (Pace, 2.)]),
+        IP::Playmaker => want(&[(Passing, 3.), (Positioning, 1.), (Awareness, 2.)]),
+        IP::Outlet => want(&[(Handling, 2.), (Passing, 2.), (Positioning, 1.)]),
+        IP::Finisher => want(&[(Accuracy, 3.), (Range, 2.), (Pace, 1.)]),
     }
 }
 
 /// What an out-of-possession role leans on.
 fn defend_want(r: OP) -> [f64; 9] {
-    //               acc rng han str con pas pos pace awr
+    use Attribute::*;
     match r {
-        OP::Destroyer => [0., 0., 0., 3., 0., 0., 0., 2., 0.],
-        OP::Presser => [0., 0., 0., 2., 2., 0., 0., 2., 0.],
-        OP::Warden => [0., 0., 1., 0., 2., 0., 2., 0., 0.],
-        OP::Sweeper => [0., 0., 1., 1., 0., 0., 3., 0., 0.],
-        OP::Cheat => [2., 1., 0., 0., 0., 0., 0., 2., 0.],
-        OP::Tracker => [0., 0., 0., 0., 2., 0., 2., 0., 1.],
+        OP::Destroyer => want(&[(Stripping, 3.), (Pace, 2.)]),
+        OP::Presser => want(&[(Stripping, 2.), (Contesting, 2.), (Pace, 2.)]),
+        OP::Warden => want(&[(Handling, 1.), (Contesting, 2.), (Positioning, 2.)]),
+        OP::Sweeper => want(&[(Handling, 1.), (Stripping, 1.), (Positioning, 3.)]),
+        OP::Cheat => want(&[(Accuracy, 2.), (Range, 1.), (Pace, 2.)]),
+        OP::Tracker => want(&[(Contesting, 2.), (Positioning, 2.), (Awareness, 1.)]),
     }
 }
 
@@ -182,12 +191,10 @@ fn coach<'a>(players: &[Player], templates: &'a [Template]) -> (&'a Template, f6
 
 /// A player's two standout attributes, for legible output.
 fn standouts(attrs: &[u8; 9]) -> String {
-    let mut idx: Vec<usize> = (0..9).collect();
-    idx.sort_by_key(|&k| std::cmp::Reverse(attrs[k]));
-    format!(
-        "{} {}, {} {}",
-        ATTR_NAMES[idx[0]], attrs[idx[0]], ATTR_NAMES[idx[1]], attrs[idx[1]]
-    )
+    let mut ranked = Attribute::ALL;
+    ranked.sort_by_key(|&a| std::cmp::Reverse(attrs[a as usize]));
+    let label = |a: Attribute| format!("{} {}", a.short(), attrs[a as usize]);
+    format!("{}, {}", label(ranked[0]), label(ranked[1]))
 }
 
 /// Generate a varied squad of 7 (the GM's roster) — random, with one or two
@@ -230,19 +237,20 @@ fn build_team(
     let roster = (0..t.slots.len())
         .map(|slot| {
             let a = players[assign[slot]].attrs;
+            let g = |attr: Attribute| a[attr as usize];
             PlayerSetup {
                 name: players[assign[slot]].name.clone(),
                 attack_role: t.slots[slot].attack,
                 defend_role: t.slots[slot].defend,
-                accuracy: a[0],
-                range: a[1],
-                handling: a[2],
-                stripping: a[3],
-                contesting: a[4],
-                passing: a[5],
-                positioning: a[6],
-                pace: a[7],
-                awareness: a[8],
+                accuracy: g(Attribute::Accuracy),
+                range: g(Attribute::Range),
+                handling: g(Attribute::Handling),
+                stripping: g(Attribute::Stripping),
+                contesting: g(Attribute::Contesting),
+                passing: g(Attribute::Passing),
+                positioning: g(Attribute::Positioning),
+                pace: g(Attribute::Pace),
+                awareness: g(Attribute::Awareness),
             }
         })
         .collect();
