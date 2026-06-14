@@ -141,6 +141,8 @@ pub fn run(args: &[String]) {
     let n = arch.len();
     // wins[i][j] = i's wins over j, summed over both team-orderings.
     let mut wins = vec![vec![0u32; n]; n];
+    // Index loops read clearer than iterators for this symmetric win matrix.
+    #[allow(clippy::needless_range_loop)]
     for i in 0..n {
         for j in (i + 1)..n {
             // i as team 0, then j as team 0 — cancels any side bias.
@@ -167,6 +169,7 @@ pub fn run(args: &[String]) {
         print!("{:>6}", a.short);
     }
     println!("{:>8}", "TOTAL");
+    #[allow(clippy::needless_range_loop)]
     for i in 0..n {
         print!("  {:<6}", arch[i].short);
         let mut total_w = 0u32;
