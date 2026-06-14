@@ -901,11 +901,28 @@ impl Simulation {
             self.reset_for_next_soul();
             events.push(Event::NewSoul);
         } else {
-            // The fire rejects it — spit the soul back into open play, away from
-            // the goal so there's no cheap put-back.
-            let goal = self.goals[team as usize];
-            let outward = (Vec2::default() - goal).clamp_len(self.config.rebound_distance);
-            self.soul = Soul::loose_at(goal + outward);
+            // The fire rejects it — a clean turnover to the defending side (the
+            // nearest defender gathers it, the same model strips use), not a
+            // net-front 50/50 scramble. The scramble rewarded ball-watching
+            // proximity over ball-winning skill and was the one place possession
+            // didn't follow merit; this lets ball-winning convert. (Prototype A.)
+            let defending = 1 - team;
+            let nearest = self
+                .agents
+                .iter()
+                .filter(|a| a.team == defending && a.is_active())
+                .min_by_key(|a| a.pos.distance_to(carrier_pos))
+                .map(|a| a.id);
+            if let Some(id) = nearest {
+                self.soul.possession = Possession::Held(id);
+                self.soul.pos = self.agents[id as usize].pos;
+                events.push(Event::PossessionGained { agent: id });
+            } else {
+                // No active defender to gather it — spit it loose as before.
+                let goal = self.goals[team as usize];
+                let outward = (Vec2::default() - goal).clamp_len(self.config.rebound_distance);
+                self.soul = Soul::loose_at(goal + outward);
+            }
         }
         false
     }

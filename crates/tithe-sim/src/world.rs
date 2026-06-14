@@ -133,6 +133,12 @@ pub struct SimConfig {
     /// spot. Positioning is *skill* (a corrupted objective), not jitter. `0`
     /// makes Positioning a no-op.
     pub positioning_ball_pull: Fx,
+    /// Spacing weight for a Positioning-1 player (scales *with* positioning). Off
+    /// the ball, a high-Positioning player is penalized for choosing a hex near a
+    /// teammate, so he spreads to fill gaps and cover distinct threats; a low one
+    /// ignores it and bunches. The mirror of `positioning_ball_pull`: poor
+    /// positioning clumps on the ball, elite spreads into space. `0` disables it.
+    pub positioning_spacing: Fx,
     /// Perception error a Awareness-0 player has reading an object at
     /// `awareness_ref_dist` (scales with `1 − awareness` and with distance).
     pub awareness_noise_max: Fx,
@@ -230,6 +236,7 @@ impl Default for SimConfig {
             footprint_edge_max: Fx::from_num(4), // never stray past 2× the radius
             carry_tether_floor: Fx::from_num(6) / Fx::from_num(10), // 0.6 — reluctance, not refusal
             positioning_ball_pull: Fx::from_num(8) / Fx::from_num(10), // 0.8 pull at Positioning 0
+            positioning_spacing: Fx::from_num(2) / Fx::from_num(10), // 0.2 — A/B off vs on
             awareness_noise_max: Fx::from_num(6), // Awareness 0 at ref dist ⇒ ±6
             awareness_ref_dist: Fx::from_num(20),
             separation_radius: Fx::from_num(5) / Fx::from_num(2), // 2.5 (< strip_radius 3)

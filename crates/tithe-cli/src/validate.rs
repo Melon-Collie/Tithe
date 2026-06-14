@@ -10,7 +10,7 @@
 //! pull its weight and wants tuning — better found here than after we build
 //! scouting and development on top of it.
 
-use tithe_sim::{BoxScore, Event, MatchSetup, PlayerLine, PlayerSetup, Simulation};
+use tithe_sim::{BoxScore, Event, MatchSetup, PlayerLine, PlayerSetup, Possession, Simulation};
 
 const ATTRS: [&str; 9] = [
     "accuracy",
@@ -50,6 +50,7 @@ pub fn run(args: &[String]) {
 
     let mut agg = BoxScore::from_events(&[], n); // zeroed table to accumulate into
     let mut wins = [0u32, 0u32];
+    let mut poss = [0u64, 0u64]; // ticks each side held the soul (possession is decisive)
     let mut unfinished = 0u32;
     for seed in seed0..seed0 + matches {
         let mut sim = Simulation::from_setup(&setup, seed).expect("controlled setup is valid");
@@ -58,6 +59,9 @@ pub fn run(args: &[String]) {
         while sim.winner().is_none() && ticks < 200_000 {
             events.extend(sim.tick());
             ticks += 1;
+            if let Possession::Held(id) = sim.soul().possession {
+                poss[teams[id as usize] as usize] += 1;
+            }
         }
         match sim.winner() {
             Some(w) => wins[w as usize] += 1,
@@ -80,6 +84,13 @@ pub fn run(args: &[String]) {
     println!();
     println!("  {:<20} {:>8} {:>8}", "metric", "team A", "team B");
     row("wins", wins[0], wins[1]);
+    let held = (poss[0] + poss[1]).max(1);
+    println!(
+        "  {:<20} {:>7}% {:>7}%   (possession is decisive — winners hold ~56%)",
+        "possession",
+        poss[0] * 100 / held,
+        poss[1] * 100 / held
+    );
     row("goals", a.goals, b.goals);
     row("offerings", a.offerings, b.offerings);
     rowp("  convert %", a.goals, a.offerings, b.goals, b.offerings);

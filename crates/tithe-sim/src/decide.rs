@@ -164,6 +164,11 @@ pub fn off_ball_target(
     let one = Fx::from_num(1);
     let zero = Fx::from_num(0);
     let ball_pull = config.positioning_ball_pull * (one - agent.attributes.positioning);
+    // Spacing (the mirror of ball-watching): a high-Positioning player is penalized
+    // for crowding a teammate, so he spreads to fill gaps and cover distinct men; a
+    // low one ignores it and bunches. `allies` includes this agent's own position
+    // (skipped below) and the carrier.
+    let spacing = config.positioning_spacing * agent.attributes.positioning;
 
     let mut best = agent.anchor;
     let mut best_score = Fx::from_num(-1);
@@ -208,7 +213,19 @@ pub fn off_ball_target(
         // Ball-watching: add a pull toward the carrier that fades with distance,
         // so a low-Positioning player's argmax shades toward the ball.
         let closeness = (one - candidate.distance_to(carrier.pos) / config.pass_max_dist).max(zero);
-        let score = (raw + ball_pull * closeness) * falloff;
+        // Spacing: penalize crowding the nearest teammate (self excluded), fading
+        // with distance — high-Positioning players spread, low ones clump.
+        let mut crowd = zero;
+        for &ally in allies {
+            if ally == agent.pos {
+                continue; // own position, not a teammate to space off
+            }
+            let c = (one - candidate.distance_to(ally) / config.pressure_radius).max(zero);
+            if c > crowd {
+                crowd = c;
+            }
+        }
+        let score = (raw + ball_pull * closeness - spacing * crowd) * falloff;
         if score > best_score {
             best_score = score;
             best = candidate;

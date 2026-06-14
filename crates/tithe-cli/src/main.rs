@@ -22,6 +22,7 @@
 mod boxscore;
 mod init;
 mod log;
+mod possession;
 mod replay;
 mod stats;
 mod validate;
@@ -36,6 +37,7 @@ fn main() {
         Some("log") => log::run(&args[2..]),
         Some("box") => boxscore::run(&args[2..]),
         Some("validate") => validate::run(&args[2..]),
+        Some("possession") => possession::run(&args[2..]),
         Some("init") => init::run(&args[2..]),
         _ => {
             eprintln!("usage:");
@@ -46,6 +48,7 @@ fn main() {
             eprintln!(
                 "  tithe validate --attr <name> [--hi N --lo N --baseline N --matches N --seed N]"
             );
+            eprintln!("  tithe possession [--matches N] [--seed N] [--setup FILE]");
             eprintln!("  tithe init     [--out FILE]   # write an editable example setup");
             std::process::exit(2);
         }
