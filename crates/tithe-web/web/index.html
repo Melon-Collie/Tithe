@@ -201,8 +201,35 @@
   ];
   boards.forEach(b => { b.ctx = b.canvas.getContext('2d'); b.f = field(b.canvas); });
 
+  // The "call the sim" seam: in-page WASM if present (the static/desktop build),
+  // else the dev server's /api. Same UI either way — only this glue differs.
+  let SIM = null;
+  async function initSim() {
+    try {
+      const mod = await import('./pkg/tithe_wasm.js');
+      await mod.default(); // wasm-bindgen init (fetches + instantiates the .wasm)
+      SIM = {
+        mode: 'wasm',
+        meta: () => JSON.parse(mod.meta()),
+        setup: () => JSON.parse(mod.default_setup()),
+        run: (b) => JSON.parse(mod.run_match(JSON.stringify(b.setup), BigInt(b.seed), BigInt(b.max_ticks))),
+      };
+    } catch (_) {
+      SIM = {
+        mode: 'server',
+        meta: async () => (await fetch('/api/meta')).json(),
+        setup: async () => (await fetch('/api/default-setup')).json(),
+        run: async (b) => {
+          const r = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+          if (!r.ok) throw new Error(await r.text());
+          return r.json();
+        },
+      };
+    }
+  }
+
   async function loadDefault() {
-    const setup = await (await fetch('/api/default-setup')).json();
+    const setup = await SIM.setup();
     editTeams = setup.teams.map((team, t) => {
       const A = setup.formations[team.attack_formation].slots;
       const D = setup.formations[team.defend_formation].slots;
@@ -394,12 +421,10 @@
   document.getElementById('run').onclick = async () => {
     statusEl.textContent = 'running…';
     const body = { setup: buildSetup(), seed: Number(document.getElementById('seed').value), max_ticks: 200000 };
-    let res;
+    let match;
     try {
-      res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      match = await SIM.run(body);
     } catch (err) { statusEl.textContent = 'error: ' + err; return; }
-    if (!res.ok) { statusEl.textContent = 'setup error: ' + (await res.text()); return; }
-    const match = await res.json();
     statusEl.textContent = `${match.frames.length} ticks · final ${match.frames.at(-1)?.score.join('–') ?? '0–0'}` +
       (match.winner != null ? ` · winner ${editTeams[match.winner].name}` : ' · (hit tick cap)');
     startViewer(match);
@@ -571,9 +596,10 @@
   });
   vc.addEventListener('mouseleave', () => { ptip.style.display = 'none'; });
 
-  // Fetch the static draw data (board + footprint shapes) once, then the setup.
+  // Pick the sim backend (WASM or dev server), then load the draw data + setup.
   (async () => {
-    try { META = await (await fetch('/api/meta')).json(); } catch (_) { META = null; }
+    await initSim();
+    try { META = await SIM.meta(); } catch (_) { META = null; }
     await loadDefault();
   })();
   requestAnimationFrame(loop);
