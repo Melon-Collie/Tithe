@@ -635,7 +635,12 @@ impl Simulation {
                 continue;
             }
             let lane = value::lane_clear(carrier_pos, recv, &p_enemies, &self.config);
-            let completion = (lane * (half + attrs.passing)).clamp(zero, one);
+            // The decision is passing-*neutral*: skill is execution, not shot
+            // selection. Everyone weighs a pass at league-average completion (the
+            // role's pass_mult drives how eagerly you pass — tendency), so a
+            // better passer completes more of the *same* passes rather than being
+            // lured into riskier ones. Passing only moves the real roll below.
+            let completion = lane.clamp(zero, one);
             if completion < self.config.pass_min_lane {
                 continue;
             }

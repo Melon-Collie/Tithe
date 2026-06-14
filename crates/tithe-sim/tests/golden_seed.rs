@@ -312,7 +312,7 @@ fn golden_default_match_hash() {
     // touching it. An EXPECTED change (you altered sim behavior on purpose) means
     // re-pin it in the same commit, after confirming the diff is the intended one.
     assert_eq!(
-        h, 0xa784_d94c_68e8_2d70,
+        h, 0x6ecc_1bd4_7363_1587,
         "golden match hash changed — actual = {h:#018x}"
     );
 }
