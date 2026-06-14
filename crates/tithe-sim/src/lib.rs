@@ -54,7 +54,7 @@ pub use fx::{Fx, Vec2, WideFx};
 pub use hex::{Board, Hex};
 pub use rng::Rng;
 pub use setup::{MatchSetup, PlayerSetup, SetupError};
-pub use world::{Agent, Formation, Possession, SimConfig, Soul};
+pub use world::{Agent, Footprint, Formation, Possession, SimConfig, Soul};
 pub use world::{InPossessionRole, OutOfPossessionRole};
 
 /// Opaque seed for a simulation run. Same seed + same inputs → same event
@@ -86,6 +86,12 @@ pub struct Simulation {
     tick: u64,
     config: SimConfig,
     goals: [Vec2; 2],
+    // The two teams, team 0 first. **Invariant: `agents[i].id == i`** — the whole
+    // sim indexes by id (`self.agents[id as usize]`). Holds by construction
+    // (fixed rosters, sequential ids). When the management layer adds benches,
+    // substitutions, and persistent cross-match player identity, keep those
+    // player ids distinct from match-local agent ids and preserve `id == index`
+    // within a match.
     agents: Vec<Agent>,
     soul: Soul,
     rng: Rng,
