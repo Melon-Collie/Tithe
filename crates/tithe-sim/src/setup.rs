@@ -32,7 +32,9 @@
 
 use crate::fx::{Fx, Vec2};
 use crate::hex::Hex;
-use crate::world::{Agent, Attributes, InPossessionRole, OutOfPossessionRole, SimConfig};
+use crate::world::{
+    Agent, Attribute, Attributes, InPossessionRole, OutOfPossessionRole, SimConfig,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -119,6 +121,22 @@ impl PlayerSetup {
             pace: one("pace", self.pace)?,
             awareness: one("awareness", self.awareness)?,
         })
+    }
+
+    /// Read one authored percentile by its canonical [`Attribute`] key — the
+    /// named bridge for code that indexes attributes positionally.
+    pub fn get(&self, a: Attribute) -> u8 {
+        match a {
+            Attribute::Accuracy => self.accuracy,
+            Attribute::Range => self.range,
+            Attribute::Handling => self.handling,
+            Attribute::Stripping => self.stripping,
+            Attribute::Contesting => self.contesting,
+            Attribute::Passing => self.passing,
+            Attribute::Positioning => self.positioning,
+            Attribute::Pace => self.pace,
+            Attribute::Awareness => self.awareness,
+        }
     }
 }
 
@@ -457,6 +475,46 @@ fn example_team(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The canonical [`Attribute`] order must stay in lockstep with the fields of
+    /// both `Attributes` and `PlayerSetup`, since coach.rs and others index
+    /// `[_; 9]` arrays by `Attribute as usize`. Build a setup whose percentile
+    /// equals each attribute's index, then assert both `get` accessors read it
+    /// back at that index — so a reorder of the enum *or* either struct fails
+    /// here instead of silently mapping the wrong stat.
+    #[test]
+    fn attribute_keys_match_fields() {
+        // ALL is in discriminant order, and the discriminant is the array index.
+        for (i, a) in Attribute::ALL.iter().enumerate() {
+            assert_eq!(*a as usize, i, "{a:?} is not at its canonical index");
+        }
+        // Encode each attribute's index as its percentile (index 0..8 ≤ 100).
+        let setup = PlayerSetup {
+            name: "probe".into(),
+            attack_role: InPossessionRole::default(),
+            defend_role: OutOfPossessionRole::default(),
+            accuracy: Attribute::Accuracy as u8,
+            range: Attribute::Range as u8,
+            handling: Attribute::Handling as u8,
+            stripping: Attribute::Stripping as u8,
+            contesting: Attribute::Contesting as u8,
+            passing: Attribute::Passing as u8,
+            positioning: Attribute::Positioning as u8,
+            pace: Attribute::Pace as u8,
+            awareness: Attribute::Awareness as u8,
+        };
+        let attrs = setup.to_attributes().expect("in range");
+        for a in Attribute::ALL {
+            assert_eq!(setup.get(a) as usize, a as usize, "PlayerSetup::get({a:?})");
+            // Attributes stores the percentile / 100; reading back the key must
+            // land on the same field.
+            assert_eq!(
+                attrs.get(a),
+                Fx::from_num(a as u8) / Fx::from_num(100),
+                "Attributes::get({a:?})"
+            );
+        }
+    }
 
     #[test]
     fn default_match_builds_fourteen_agents() {

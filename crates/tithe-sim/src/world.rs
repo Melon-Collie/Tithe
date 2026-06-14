@@ -344,6 +344,58 @@ impl Formation {
     }
 }
 
+/// The nine player attributes in their **canonical order** — the one source of
+/// truth for any code that must iterate or index attributes positionally rather
+/// than name them (the coach's role-want vectors, scout summaries, the
+/// management UI's stat columns). The discriminant doubles as that index, so
+/// `Attribute::Handling as usize` is the slot Handling occupies in any
+/// `[_; 9]` attribute array. Keep this in lockstep with the fields of
+/// [`Attributes`] and [`PlayerSetup`]; the `attribute_keys_match_fields` test
+/// fails loudly if they ever drift, so a reorder can't silently misalign.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Attribute {
+    Accuracy,
+    Range,
+    Handling,
+    Stripping,
+    Contesting,
+    Passing,
+    Positioning,
+    Pace,
+    Awareness,
+}
+
+impl Attribute {
+    /// Every attribute in canonical order — drive positional loops off this
+    /// rather than hand-writing `0..9`, so the order lives in exactly one place.
+    pub const ALL: [Attribute; 9] = [
+        Attribute::Accuracy,
+        Attribute::Range,
+        Attribute::Handling,
+        Attribute::Stripping,
+        Attribute::Contesting,
+        Attribute::Passing,
+        Attribute::Positioning,
+        Attribute::Pace,
+        Attribute::Awareness,
+    ];
+
+    /// Short scout/box-score label.
+    pub fn short(self) -> &'static str {
+        match self {
+            Attribute::Accuracy => "Acc",
+            Attribute::Range => "Rng",
+            Attribute::Handling => "Han",
+            Attribute::Stripping => "Str",
+            Attribute::Contesting => "Con",
+            Attribute::Passing => "Pas",
+            Attribute::Positioning => "Pos",
+            Attribute::Pace => "Pace",
+            Attribute::Awareness => "Awr",
+        }
+    }
+}
+
 /// Per-player capabilities. A stat exists only because some sim step consumes
 /// it (§4): shooting splits into `accuracy` (point-blank conversion quality) and
 /// `range` (how far that quality holds up — the perimeter threat); `handling`
@@ -416,6 +468,23 @@ impl Attributes {
             positioning: draw_attribute(rng),
             pace: draw_attribute(rng),
             awareness: draw_attribute(rng),
+        }
+    }
+
+    /// Read one attribute by its canonical [`Attribute`] key — the named bridge
+    /// for code that iterates or indexes attributes (so it never has to assume a
+    /// positional order).
+    pub fn get(&self, a: Attribute) -> Fx {
+        match a {
+            Attribute::Accuracy => self.accuracy,
+            Attribute::Range => self.range,
+            Attribute::Handling => self.handling,
+            Attribute::Stripping => self.stripping,
+            Attribute::Contesting => self.contesting,
+            Attribute::Passing => self.passing,
+            Attribute::Positioning => self.positioning,
+            Attribute::Pace => self.pace,
+            Attribute::Awareness => self.awareness,
         }
     }
 }

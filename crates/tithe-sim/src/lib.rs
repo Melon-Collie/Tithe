@@ -54,7 +54,7 @@ pub use fx::{Fx, Vec2, WideFx};
 pub use hex::{Board, Hex};
 pub use rng::Rng;
 pub use setup::{MatchSetup, PlayerSetup, SetupError};
-pub use world::{Agent, Footprint, Formation, Possession, SimConfig, Soul};
+pub use world::{Agent, Attribute, Footprint, Formation, Possession, SimConfig, Soul};
 pub use world::{InPossessionRole, OutOfPossessionRole};
 
 /// Opaque seed for a simulation run. Same seed + same inputs → same event
