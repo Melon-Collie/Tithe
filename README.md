@@ -4,6 +4,8 @@ A pure-manager sports sim for an invented ball sport — box-lacrosse bones unde
 
 The canonical design source is [`fantasy-sport-sim-design.md`](./fantasy-sport-sim-design.md).
 
+**▶ Play the live web demo: https://melon-collie.github.io/Tithe/** — the sim compiled to WASM, running entirely in your browser (no backend). Edit both teams' formations and roles, run a match, and watch it.
+
 ## Status
 
 The headless Rust sim core plays the invented sport **AI-vs-AI end to end** — faceoff → strip → EV carry/pass/shoot → wind-up offering → first-to-X — on a shared value field with per-player attributes, zonal defense, and a hex-grid positioning model that narrates as a sport. Around it: a command-line consumer (`tithe-cli`) for HTML replays and play-by-play, a local web watch-view (`tithe-web`), measurement tools for balancing the player attributes, and a v1 AI coach that fields a squad into a formation. The sport itself is tuned and playable; the full management game, the polished front end, and desktop distribution are still open (§9).
@@ -62,6 +64,8 @@ cargo run -p tithe-web                # then open http://127.0.0.1:8770/
 # Web demo: the sim compiled to WASM, running in the page — no server backend
 ./crates/tithe-wasm/build-demo.sh     # builds the WASM, serves the static files
 ```
+
+The web demo is also published to GitHub Pages on every push to main (`.github/workflows/pages.yml`) — live at **https://melon-collie.github.io/Tithe/**.
 
 The page picks its backend automatically: in-page WASM if present (the static/desktop build), else the dev server's `/api`. The sim is a pure function of `(inputs, seed)`, so both produce byte-identical results. Desktop (Tauri, native sim) is the eventual third target — same UI again.
 
