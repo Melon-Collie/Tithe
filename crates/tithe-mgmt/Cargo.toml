@@ -1,0 +1,22 @@
+[package]
+name = "tithe-mgmt"
+description = "The management layer: persistent players, clubs, and a career that feeds matchups to tithe-sim and ingests their results. Pure, deterministic, headless — like the sim, one layer up."
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The management layer sits *above* the sim: it builds the sim's inputs
+# (MatchSetup) and consumes its outputs (BoxScore). The dependency goes one way
+# only — the sim never knows the management layer exists.
+tithe-sim = { path = "../tithe-sim" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# Only for serde round-trip tests. The crate itself does no I/O — consumers
+# (CLI, web) own persistence — so a concrete format is a test/consumer concern.
+serde_json = "1"

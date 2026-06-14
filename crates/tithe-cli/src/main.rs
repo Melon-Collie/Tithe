@@ -20,6 +20,7 @@
 //! `tithe-sim`.
 
 mod boxscore;
+mod career;
 mod coach;
 mod init;
 mod log;
@@ -42,6 +43,7 @@ fn main() {
         Some("possession") => possession::run(&args[2..]),
         Some("tournament") => tournament::run(&args[2..]),
         Some("coach") => coach::run(&args[2..]),
+        Some("career") => career::run(&args[2..]),
         Some("init") => init::run(&args[2..]),
         _ => {
             eprintln!("usage:");
@@ -55,6 +57,9 @@ fn main() {
             eprintln!("  tithe possession [--matches N] [--seed N] [--setup FILE]");
             eprintln!("  tithe tournament [--matches N] [--seed N]   # archetype round-robin");
             eprintln!("  tithe coach      [--seed N]   # AI coach: fit a squad to a template");
+            eprintln!(
+                "  tithe career     [--seed N] [--out FILE]   # demo career: play a match, save it"
+            );
             eprintln!("  tithe init     [--out FILE]   # write an editable example setup");
             std::process::exit(2);
         }

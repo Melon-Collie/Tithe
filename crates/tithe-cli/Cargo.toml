@@ -17,6 +17,9 @@ workspace = true
 # A consumer, not the sim core — serialization and floats live here, at the
 # render boundary, never in tithe-sim.
 tithe-sim = { path = "../tithe-sim" }
+# The management layer (rosters/clubs/career). The CLI is its first consumer and
+# owns the save-file I/O the crate itself deliberately avoids.
+tithe-mgmt = { path = "../tithe-mgmt" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Reads/writes the human-authored match-setup files (the coach-input boundary)
