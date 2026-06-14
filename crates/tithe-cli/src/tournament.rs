@@ -158,7 +158,11 @@ pub fn run(args: &[String]) {
         "== Archetype tournament ({} games per matchup, seeds {seed0}..{}, budget 450, {}) ==",
         per_pair,
         seed0 + matches,
-        if fwd { "shared forward finisher" } else { "uniform" }
+        if fwd {
+            "shared forward finisher"
+        } else {
+            "uniform"
+        }
     );
     for a in &arch {
         println!("  {:<5} {}", a.short, a.name);
