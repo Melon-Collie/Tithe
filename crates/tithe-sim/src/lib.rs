@@ -237,7 +237,6 @@ impl Simulation {
     /// Off-ball agents shade by the value field (see `decide::off_ball_target`);
     /// active-pursuit intents map straight to their target.
     fn run_decisions(&mut self) {
-        let one = Fx::from_num(1);
         let board = self.board();
         let carrier = self.carrier_info();
         let real_soul = self.soul.pos;
@@ -255,15 +254,8 @@ impl Simulation {
             let in_possession = carrier.is_some_and(|c| c.team == teams[i]);
             self.agents[i].apply_phase(in_possession);
 
-            // Anchor discipline: a low-Positioning player works off a noisy
-            // anchor (he can't hold his exact spot), re-erring each window.
-            let slack =
-                self.config.positioning_noise_max * (one - self.agents[i].attributes.positioning);
-            let anchor_noise = Vec2::new(
-                signed_unit(&mut self.rng) * slack,
-                signed_unit(&mut self.rng) * slack,
-            );
-            self.agents[i].anchor = self.agents[i].anchor + anchor_noise;
+            // Positioning is applied in `off_ball_target` as footprint reach (skill,
+            // not jitter), so the anchor itself is left exact here.
 
             // Awareness: build this agent's private, noisy read of everyone and
             // the soul. He decides on *this* picture; the outcome resolves on the
@@ -643,7 +635,12 @@ impl Simulation {
                 continue;
             }
             let lane = value::lane_clear(carrier_pos, recv, &p_enemies, &self.config);
-            let completion = (lane * (half + attrs.passing)).clamp(zero, one);
+            // The decision is passing-*neutral*: skill is execution, not shot
+            // selection. Everyone weighs a pass at league-average completion (the
+            // role's pass_mult drives how eagerly you pass — tendency), so a
+            // better passer completes more of the *same* passes rather than being
+            // lured into riskier ones. Passing only moves the real roll below.
+            let completion = lane.clamp(zero, one);
             if completion < self.config.pass_min_lane {
                 continue;
             }
@@ -675,17 +672,41 @@ impl Simulation {
         // perceived; the OUTCOME resolves on the *real* lane to the real receiver.
         if best_pass_ev > carry_ev + self.config.pass_value_margin {
             let (receiver, _) = best_pass.expect("best_pass_ev came from Some");
-            let (real_lane, blocker) =
-                self.pass_lane(carrier_pos, real_pos[receiver as usize], team);
+            let (real_lane, _) = self.pass_lane(carrier_pos, real_pos[receiver as usize], team);
             let completion = (real_lane * (half + attrs.passing)).clamp(zero, one);
             let pct = (completion * Fx::from_num(100)).to_num::<u64>();
             let completed = self.rng.below(100) < pct;
-            let intercepted = !completed && blocker.is_some();
-            let to = if intercepted {
-                blocker.expect("a failed pass has a blocker")
+            // A failed roll is picked off by the nearest defender within the wider
+            // interception radius (he reads the bad ball); with none that close the
+            // lane was genuinely open, so it still reaches the receiver. This is
+            // what punishes poor passing and gives cover-shadow a real channel.
+            let interceptor = if completed {
+                None
             } else {
-                receiver
+                let candidate = self
+                    .worst_lane_defender(
+                        carrier_pos,
+                        real_pos[receiver as usize],
+                        team,
+                        self.config.intercept_lane_radius,
+                        one / Fx::from_num(4), // skip only the quarter nearest the passer
+                    )
+                    .1;
+                // Positioning *is* the read: a well-positioned defender jumps the
+                // lane; a ball-watcher is near it but misreads and it completes.
+                // Floored so picks are common enough that Passing (which fails the
+                // roll) still bites — `floor + (1-floor)·Positioning`. This makes
+                // Positioning a first-order possession lever instead of rewarding
+                // whoever happens to swarm the ball.
+                let floor = self.config.intercept_read_floor;
+                candidate.filter(|&id| {
+                    let read =
+                        floor + (one - floor) * self.agents[id as usize].attributes.positioning;
+                    self.rng.below(100) < (read * Fx::from_num(100)).to_num::<u64>()
+                })
             };
+            let intercepted = interceptor.is_some();
+            let to = interceptor.unwrap_or(receiver);
             self.soul.possession = Possession::InFlight { to, intercepted };
             events.push(Event::PassMade {
                 from: carrier_id,
@@ -754,18 +775,41 @@ impl Simulation {
         (best, best_ev)
     }
 
-    /// Lane clearance in `[0, 1]` for a pass `from`→`to`, plus the worst lane
-    /// defender (the would-be interceptor). Per-defender block = perp_factor ×
-    /// the defender's Contesting; endpoints excluded (a defender on the passer
-    /// or receiver isn't *in* the lane).
+    /// Lane clearance in `[0, 1]` for a pass `from`→`to` (using `lane_radius`),
+    /// plus the worst lane defender. Per-defender block = perp_factor × Contesting.
+    /// Completion is contested along the *whole* lane (`min_t = 0`).
     fn pass_lane(&self, from: Vec2, to: Vec2, passing_team: u8) -> (Fx, Option<u32>) {
+        self.worst_lane_defender(
+            from,
+            to,
+            passing_team,
+            self.config.lane_radius,
+            Fx::from_num(0),
+        )
+    }
+
+    /// The most threatening enemy within `radius` of the pass line whose
+    /// projection along it is past `min_t` (the would-be interceptor), and the
+    /// resulting lane clearance `1 − block`. Per-defender block = perp_factor ×
+    /// Contesting; endpoints excluded. `pass_lane` uses the tight completion
+    /// radius over the whole lane; a failed roll is picked off downfield only
+    /// (`min_t = 0.5`) within the wider `intercept_lane_radius` — you read and jump
+    /// a pass *downfield*, not at the passer's feet, so cover-shadow earns the
+    /// pick rather than whoever's swarming the ball.
+    fn worst_lane_defender(
+        &self,
+        from: Vec2,
+        to: Vec2,
+        passing_team: u8,
+        radius: Fx,
+        min_t: Fx,
+    ) -> (Fx, Option<u32>) {
         let seg = to - from;
         let len_sq: WideFx = seg.x.wide_mul(seg.x) + seg.y.wide_mul(seg.y);
         let zero = WideFx::from_num(0);
         if len_sq <= zero {
             return (Fx::from_num(1), None);
         }
-        let radius = self.config.lane_radius;
         let mut max_block = Fx::from_num(0);
         let mut blocker = None;
         for agent in &self.agents {
@@ -778,6 +822,9 @@ impl Simulation {
                 continue; // not strictly between the endpoints
             }
             let t = Fx::saturating_from_num(dot / len_sq);
+            if t < min_t {
+                continue; // too close to the passer to read-and-jump
+            }
             let perp = agent.pos.distance_to(from + seg.scale(t));
             if perp >= radius {
                 continue;
@@ -829,19 +876,29 @@ impl Simulation {
         false
     }
 
-    /// Summed Contesting of enemies within harry range of a shot, capped — the
-    /// contest term that cuts a shot's success.
+    /// The **tightest single marker's** contest of an offering: the best
+    /// (closeness × Contesting) over enemies in harry range, *not* a sum. A swarm
+    /// contests no better than its closest man, so you can't smother the goal with
+    /// bodies — you must put a marker on each potential offerer. That's what makes
+    /// off-ball Positioning matter: leave a man open and he offers uncontested.
     fn offering_contest(&self, team: u8, carrier_pos: Vec2) -> Fx {
-        let mut contest = Fx::from_num(0);
+        let radius = self.config.offering_contest_radius;
+        let one = Fx::from_num(1);
+        let mut tightest = Fx::from_num(0);
         for agent in &self.agents {
-            if agent.team != team
-                && agent.is_active()
-                && agent.pos.distance_to(carrier_pos) <= self.config.offering_contest_radius
-            {
-                contest += agent.attributes.contesting;
+            if agent.team != team && agent.is_active() {
+                let d = agent.pos.distance_to(carrier_pos);
+                if d <= radius {
+                    // Closeness fades from 1 on the offerer to 0 at the harry edge,
+                    // so a tight marker contests hard and a loose one barely.
+                    let contribution = agent.attributes.contesting * (one - d / radius);
+                    if contribution > tightest {
+                        tightest = contribution;
+                    }
+                }
             }
         }
-        contest.min(self.config.offering_contest_max)
+        tightest.min(self.config.offering_contest_max)
     }
 
     /// Probability a shot from `distance` scores: peak quality (base +
@@ -894,11 +951,28 @@ impl Simulation {
             self.reset_for_next_soul();
             events.push(Event::NewSoul);
         } else {
-            // The fire rejects it — spit the soul back into open play, away from
-            // the goal so there's no cheap put-back.
-            let goal = self.goals[team as usize];
-            let outward = (Vec2::default() - goal).clamp_len(self.config.rebound_distance);
-            self.soul = Soul::loose_at(goal + outward);
+            // The fire rejects it — a clean turnover to the defending side (the
+            // nearest defender gathers it, the same model strips use), not a
+            // net-front 50/50 scramble. The scramble rewarded ball-watching
+            // proximity over ball-winning skill and was the one place possession
+            // didn't follow merit; this lets ball-winning convert. (Prototype A.)
+            let defending = 1 - team;
+            let nearest = self
+                .agents
+                .iter()
+                .filter(|a| a.team == defending && a.is_active())
+                .min_by_key(|a| a.pos.distance_to(carrier_pos))
+                .map(|a| a.id);
+            if let Some(id) = nearest {
+                self.soul.possession = Possession::Held(id);
+                self.soul.pos = self.agents[id as usize].pos;
+                events.push(Event::PossessionGained { agent: id });
+            } else {
+                // No active defender to gather it — spit it loose as before.
+                let goal = self.goals[team as usize];
+                let outward = (Vec2::default() - goal).clamp_len(self.config.rebound_distance);
+                self.soul = Soul::loose_at(goal + outward);
+            }
         }
         false
     }

@@ -140,8 +140,8 @@ pub fn off_ball_target(
     let enemy_goal = goals[1 - agent.team as usize];
 
     // The role's footprint — an ellipse (size × aspect + a forward lean) placed
-    // at the (noised) anchor. Attacking uses the in-possession role's shape;
-    // defending uses the out-of-possession role's.
+    // at the anchor. Attacking uses the in-possession role's shape; defending the
+    // out-of-possession role's.
     let footprint = if attacking {
         config.on_ball_bias(agent.attack_role).footprint
     } else {
@@ -155,6 +155,20 @@ pub fn off_ball_target(
         Fx::from_num(-1)
     };
     let center = footprint.center(agent.anchor, fwd);
+
+    // Positioning as resistance to ball-watching: a low-Positioning player's hex
+    // appeal is dragged toward the soul (he drifts to the ball, off his man/lane);
+    // a high-Positioning player ignores the ball's gravity. Skill via a corrupted
+    // objective, not jitter (design law 4); bounded by the footprint, so he shades
+    // ball-side within his zone rather than abandoning it.
+    let one = Fx::from_num(1);
+    let zero = Fx::from_num(0);
+    let ball_pull = config.positioning_ball_pull * (one - agent.attributes.positioning);
+    // Spacing (the mirror of ball-watching): a high-Positioning player is penalized
+    // for crowding a teammate, so he spreads to fill gaps and cover distinct men; a
+    // low one ignores it and bunches. `allies` includes this agent's own position
+    // (skipped below) and the carrier.
+    let spacing = config.positioning_spacing * agent.attributes.positioning;
 
     let mut best = agent.anchor;
     let mut best_score = Fx::from_num(-1);
@@ -196,7 +210,22 @@ pub fn off_ball_target(
             }
             removed
         };
-        let score = raw * falloff;
+        // Ball-watching: add a pull toward the carrier that fades with distance,
+        // so a low-Positioning player's argmax shades toward the ball.
+        let closeness = (one - candidate.distance_to(carrier.pos) / config.pass_max_dist).max(zero);
+        // Spacing: penalize crowding the nearest teammate (self excluded), fading
+        // with distance — high-Positioning players spread, low ones clump.
+        let mut crowd = zero;
+        for &ally in allies {
+            if ally == agent.pos {
+                continue; // own position, not a teammate to space off
+            }
+            let c = (one - candidate.distance_to(ally) / config.pressure_radius).max(zero);
+            if c > crowd {
+                crowd = c;
+            }
+        }
+        let score = (raw + ball_pull * closeness - spacing * crowd) * falloff;
         if score > best_score {
             best_score = score;
             best = candidate;

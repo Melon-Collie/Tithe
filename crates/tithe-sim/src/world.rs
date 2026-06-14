@@ -96,8 +96,19 @@ pub struct SimConfig {
     pub pressure_radius: Fx,
     /// Enemy-count (distance-weighted) that fully smothers a spot's openness.
     pub pressure_max: Fx,
-    /// Perpendicular distance within which a defender blocks a pass lane.
+    /// Perpendicular distance within which a defender blocks a pass lane (cuts
+    /// the completion estimate).
     pub lane_radius: Fx,
+    /// Perpendicular distance within which a defender can *pick off* a pass whose
+    /// completion roll failed — wider than `lane_radius` (he reads a bad ball from
+    /// a step away). A failed roll with no defender this close still reaches the
+    /// receiver (a genuinely open lane), so only contested passes get picked.
+    pub intercept_lane_radius: Fx,
+    /// Floor on the interception "read" — the pick chance for a Positioning-0
+    /// defender who's downfield in the lane (rises to 1 at Positioning 1). Keeps
+    /// picks common enough that Passing still bites while making Positioning the
+    /// read skill: `read = floor + (1 − floor)·Positioning`.
+    pub intercept_read_floor: Fx,
     /// Distance from the in-flight soul's path within which an enemy picks it off.
     pub intercept_radius: Fx,
     /// Stamina lost per tick just by being on the field (active).
@@ -126,9 +137,19 @@ pub struct SimConfig {
     /// carrier give it up entirely. (Off-ball positioning has no floor — the
     /// defensive shape stays firm.)
     pub carry_tether_floor: Fx,
-    /// Max positional noise added to a Positioning-0 player's anchor each window
-    /// (scales with `1 − positioning`; a disciplined player adds ~none).
-    pub positioning_noise_max: Fx,
+    /// Ball-watching pull for a Positioning-0 player (scales with `1 −
+    /// positioning`). Off the ball, a low-Positioning player's hex appeal is
+    /// dragged toward the soul — he drifts to the ball and off his man/lane; a
+    /// high-Positioning player ignores the ball's gravity and holds the right
+    /// spot. Positioning is *skill* (a corrupted objective), not jitter. `0`
+    /// makes Positioning a no-op.
+    pub positioning_ball_pull: Fx,
+    /// Spacing weight for a Positioning-1 player (scales *with* positioning). Off
+    /// the ball, a high-Positioning player is penalized for choosing a hex near a
+    /// teammate, so he spreads to fill gaps and cover distinct threats; a low one
+    /// ignores it and bunches. The mirror of `positioning_ball_pull`: poor
+    /// positioning clumps on the ball, elite spreads into space. `0` disables it.
+    pub positioning_spacing: Fx,
     /// Perception error a Awareness-0 player has reading an object at
     /// `awareness_ref_dist` (scales with `1 − awareness` and with distance).
     pub awareness_noise_max: Fx,
@@ -216,6 +237,8 @@ impl Default for SimConfig {
             pressure_radius: Fx::from_num(12),
             pressure_max: Fx::from_num(2),
             lane_radius: Fx::from_num(4),
+            intercept_lane_radius: Fx::from_num(9), // ~2 hexes — a defender reads a bad pass
+            intercept_read_floor: Fx::from_num(5) / Fx::from_num(10), // 0.5 — picks common, Positioning swings them
             intercept_radius: Fx::from_num(3),
             stamina_drain_base: Fx::from_num(5) / Fx::from_num(10000), // 0.0005
             stamina_drain_per_unit: Fx::from_num(25) / Fx::from_num(10000), // 0.0025
@@ -225,7 +248,8 @@ impl Default for SimConfig {
             footprint_edge_softness: Fx::from_num(3),                  // firm but soft at the edge
             footprint_edge_max: Fx::from_num(4), // never stray past 2× the radius
             carry_tether_floor: Fx::from_num(6) / Fx::from_num(10), // 0.6 — reluctance, not refusal
-            positioning_noise_max: Fx::from_num(8), // Positioning 0.5 ⇒ ±4 of drift
+            positioning_ball_pull: Fx::from_num(8) / Fx::from_num(10), // 0.8 pull at Positioning 0
+            positioning_spacing: Fx::from_num(2) / Fx::from_num(10), // 0.2 — A/B off vs on
             awareness_noise_max: Fx::from_num(6), // Awareness 0 at ref dist ⇒ ±6
             awareness_ref_dist: Fx::from_num(20),
             separation_radius: Fx::from_num(5) / Fx::from_num(2), // 2.5 (< strip_radius 3)
