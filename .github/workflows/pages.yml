@@ -57,6 +57,10 @@ jobs:
 
   deploy:
     needs: build
+    # Only main deploys (the github-pages environment is gated to the default
+    # branch anyway). On a branch run, this job *skips* rather than failing the
+    # environment gate — so test + build still validate, with no red X.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
