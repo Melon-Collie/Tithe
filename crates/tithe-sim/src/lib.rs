@@ -237,7 +237,6 @@ impl Simulation {
     /// Off-ball agents shade by the value field (see `decide::off_ball_target`);
     /// active-pursuit intents map straight to their target.
     fn run_decisions(&mut self) {
-        let one = Fx::from_num(1);
         let board = self.board();
         let carrier = self.carrier_info();
         let real_soul = self.soul.pos;
@@ -255,15 +254,8 @@ impl Simulation {
             let in_possession = carrier.is_some_and(|c| c.team == teams[i]);
             self.agents[i].apply_phase(in_possession);
 
-            // Anchor discipline: a low-Positioning player works off a noisy
-            // anchor (he can't hold his exact spot), re-erring each window.
-            let slack =
-                self.config.positioning_noise_max * (one - self.agents[i].attributes.positioning);
-            let anchor_noise = Vec2::new(
-                signed_unit(&mut self.rng) * slack,
-                signed_unit(&mut self.rng) * slack,
-            );
-            self.agents[i].anchor = self.agents[i].anchor + anchor_noise;
+            // Positioning is applied in `off_ball_target` as footprint reach (skill,
+            // not jitter), so the anchor itself is left exact here.
 
             // Awareness: build this agent's private, noisy read of everyone and
             // the soul. He decides on *this* picture; the outcome resolves on the
@@ -829,19 +821,29 @@ impl Simulation {
         false
     }
 
-    /// Summed Contesting of enemies within harry range of a shot, capped — the
-    /// contest term that cuts a shot's success.
+    /// The **tightest single marker's** contest of an offering: the best
+    /// (closeness × Contesting) over enemies in harry range, *not* a sum. A swarm
+    /// contests no better than its closest man, so you can't smother the goal with
+    /// bodies — you must put a marker on each potential offerer. That's what makes
+    /// off-ball Positioning matter: leave a man open and he offers uncontested.
     fn offering_contest(&self, team: u8, carrier_pos: Vec2) -> Fx {
-        let mut contest = Fx::from_num(0);
+        let radius = self.config.offering_contest_radius;
+        let one = Fx::from_num(1);
+        let mut tightest = Fx::from_num(0);
         for agent in &self.agents {
-            if agent.team != team
-                && agent.is_active()
-                && agent.pos.distance_to(carrier_pos) <= self.config.offering_contest_radius
-            {
-                contest += agent.attributes.contesting;
+            if agent.team != team && agent.is_active() {
+                let d = agent.pos.distance_to(carrier_pos);
+                if d <= radius {
+                    // Closeness fades from 1 on the offerer to 0 at the harry edge,
+                    // so a tight marker contests hard and a loose one barely.
+                    let contribution = agent.attributes.contesting * (one - d / radius);
+                    if contribution > tightest {
+                        tightest = contribution;
+                    }
+                }
             }
         }
-        contest.min(self.config.offering_contest_max)
+        tightest.min(self.config.offering_contest_max)
     }
 
     /// Probability a shot from `distance` scores: peak quality (base +
