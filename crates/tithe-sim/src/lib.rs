@@ -54,7 +54,7 @@ pub use fx::{Fx, Vec2, WideFx};
 pub use hex::{Board, Hex};
 pub use rng::Rng;
 pub use setup::{MatchSetup, PlayerSetup, SetupError};
-pub use world::{Agent, Attribute, Formation, Possession, SimConfig, Soul};
+pub use world::{Agent, Attribute, Footprint, Formation, Possession, SimConfig, Soul};
 pub use world::{InPossessionRole, OutOfPossessionRole};
 
 /// Opaque seed for a simulation run. Same seed + same inputs → same event
@@ -86,6 +86,12 @@ pub struct Simulation {
     tick: u64,
     config: SimConfig,
     goals: [Vec2; 2],
+    // The two teams, team 0 first. **Invariant: `agents[i].id == i`** — the whole
+    // sim indexes by id (`self.agents[id as usize]`). Holds by construction
+    // (fixed rosters, sequential ids). When the management layer adds benches,
+    // substitutions, and persistent cross-match player identity, keep those
+    // player ids distinct from match-local agent ids and preserve `id == index`
+    // within a match.
     agents: Vec<Agent>,
     soul: Soul,
     rng: Rng,
@@ -108,17 +114,42 @@ impl Simulation {
     }
 
     /// Start a run from an authored [`MatchSetup`] (the coach-input boundary) and
-    /// `seed`. The roster — attributes, roles, formations — comes from the setup;
-    /// the seed still drives all match dynamics. Returns a [`SetupError`] if the
-    /// setup is malformed (bad roster size, unknown formation, …).
+    /// `seed`, using the default tuning dials. The roster — attributes, roles,
+    /// formations — comes from the setup; the seed still drives all match
+    /// dynamics. Returns a [`SetupError`] if the setup is malformed (bad roster
+    /// size, unknown formation, …).
+    ///
+    /// This is the common case; it forwards [`SimConfig::default`] to
+    /// [`from_setup_with_config`]. The tuning dials are a per-match **input**
+    /// (see that method), not a global constant — `default` is simply the dials
+    /// most callers want.
+    ///
+    /// [`from_setup_with_config`]: Simulation::from_setup_with_config
     pub fn from_setup(setup: &MatchSetup, seed: Seed) -> Result<Self, SetupError> {
+        Self::from_setup_with_config(setup, SimConfig::default(), seed)
+    }
+
+    /// Start a run from an authored [`MatchSetup`], an explicit [`SimConfig`],
+    /// and `seed`. This is the seam that makes the tuning dials a first-class,
+    /// **per-match input**: a league (or a tuning sweep) carries its own config
+    /// and threads it in here, rather than the sim assuming one global constant.
+    /// Determinism is unaffected — the run is still a pure function of
+    /// `(setup, config, seed)`.
+    ///
+    /// Note (load-bearing): config is *not* yet part of the serialized wire
+    /// format, so a persisted replay records `(setup, seed)` but not the dials
+    /// it ran under. While every caller passes [`SimConfig::default`] that's
+    /// invisible, and the golden-seed test pins the default config's behavior.
+    /// Persisting a replay made with a *non-default* config will need an
+    /// authored config wire format (integer dials → `Fx`, the way
+    /// [`PlayerSetup`] does attributes — `Fx` never serializes; see [`fx`]).
+    pub fn from_setup_with_config(
+        setup: &MatchSetup,
+        config: SimConfig,
+        seed: Seed,
+    ) -> Result<Self, SetupError> {
         let agents = setup::build_agents(setup)?;
-        Ok(Self::assemble(
-            seed,
-            SimConfig::default(),
-            agents,
-            Rng::new(seed),
-        ))
+        Ok(Self::assemble(seed, config, agents, Rng::new(seed)))
     }
 
     /// Shared assembly for both construction paths: a loose soul at center, an
@@ -1015,6 +1046,24 @@ impl Simulation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An injected [`SimConfig`] threads all the way through the match, instead
+    /// of the sim silently using `default()`. Pins the item-3 seam: a league or
+    /// tuning sweep can carry its own dials.
+    #[test]
+    fn injected_config_threads_through() {
+        let setup = MatchSetup::default_match();
+        let mut config = SimConfig::default();
+        config.souls_to_win += 5;
+        let sim = Simulation::from_setup_with_config(&setup, config.clone(), 0).expect("valid");
+        assert_eq!(sim.config().souls_to_win, config.souls_to_win);
+        // The default path is unchanged — still the default dials.
+        let dflt = Simulation::from_setup(&setup, 0).expect("valid");
+        assert_eq!(
+            dflt.config().souls_to_win,
+            SimConfig::default().souls_to_win
+        );
+    }
 
     /// A shot's success falls off with distance, and a high-Range shooter holds
     /// his chance much further out than a low-Range one (the Sniper vs Perimeter

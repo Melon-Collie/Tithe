@@ -155,7 +155,7 @@ fn board_export(board: &Board) -> BoardExport {
 pub fn meta() -> Meta {
     let cfg = SimConfig::default();
     let board = Board::oval(cfg.hex_size, cfg.arena_half_x, cfg.arena_half_y);
-    let fp = |f: tithe_sim::world::Footprint| {
+    let fp = |f: tithe_sim::Footprint| {
         [
             f.half_x.to_num::<f32>(),
             f.half_y.to_num::<f32>(),

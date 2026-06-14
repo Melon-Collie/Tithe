@@ -19,10 +19,16 @@
 //! converted to fixed-point here, so the format stays human-authorable and the
 //! determinism contract is untouched.
 //!
-//! Tuning config (`SimConfig` — arena size, souls-to-win, the AI dials) is *not*
-//! part of the setup yet; a match built from a setup uses [`SimConfig::default`].
+//! Tuning config (`SimConfig` — arena size, souls-to-win, the AI dials) is a
+//! sibling input, not part of this setup: a match carries it alongside, via
+//! [`Simulation::from_setup_with_config`]. [`Simulation::from_setup`] forwards
+//! [`SimConfig::default`] for the common case. Keeping config out of the setup
+//! is deliberate — the setup is the *coach's* authored inputs, while the dials
+//! are league/tuning configuration the management layer owns.
 //!
 //! [`SimConfig::default`]: crate::SimConfig
+//! [`Simulation::from_setup`]: crate::Simulation::from_setup
+//! [`Simulation::from_setup_with_config`]: crate::Simulation::from_setup_with_config
 
 use crate::fx::{Fx, Vec2};
 use crate::hex::Hex;

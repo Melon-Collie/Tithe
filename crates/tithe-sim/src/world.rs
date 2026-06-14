@@ -109,8 +109,6 @@ pub struct SimConfig {
     /// picks common enough that Passing still bites while making Positioning the
     /// read skill: `read = floor + (1 − floor)·Positioning`.
     pub intercept_read_floor: Fx,
-    /// Distance from the in-flight soul's path within which an enemy picks it off.
-    pub intercept_radius: Fx,
     /// Stamina lost per tick just by being on the field (active).
     pub stamina_drain_base: Fx,
     /// Extra stamina lost per unit of distance moved (effort — pressers tire fastest).
@@ -239,13 +237,12 @@ impl Default for SimConfig {
             lane_radius: Fx::from_num(4),
             intercept_lane_radius: Fx::from_num(9), // ~2 hexes — a defender reads a bad pass
             intercept_read_floor: Fx::from_num(5) / Fx::from_num(10), // 0.5 — picks common, Positioning swings them
-            intercept_radius: Fx::from_num(3),
             stamina_drain_base: Fx::from_num(5) / Fx::from_num(10000), // 0.0005
             stamina_drain_per_unit: Fx::from_num(25) / Fx::from_num(10000), // 0.0025
             stamina_speed_floor: Fx::from_num(55) / Fx::from_num(100), // 0.55
-            pace_floor: Fx::from_num(75) / Fx::from_num(100),          // 0.75 (Pace 0)
-            pace_ceil: Fx::from_num(125) / Fx::from_num(100),          // 1.25 (Pace 1)
-            footprint_edge_softness: Fx::from_num(3),                  // firm but soft at the edge
+            pace_floor: Fx::from_num(75) / Fx::from_num(100),         // 0.75 (Pace 0)
+            pace_ceil: Fx::from_num(125) / Fx::from_num(100),         // 1.25 (Pace 1)
+            footprint_edge_softness: Fx::from_num(3),                 // firm but soft at the edge
             footprint_edge_max: Fx::from_num(4), // never stray past 2× the radius
             carry_tether_floor: Fx::from_num(6) / Fx::from_num(10), // 0.6 — reluctance, not refusal
             positioning_ball_pull: Fx::from_num(8) / Fx::from_num(10), // 0.8 pull at Positioning 0
