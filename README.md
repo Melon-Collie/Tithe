@@ -53,9 +53,15 @@ The CLI (`cargo run -p tithe-cli -- <command>`, or `tithe <command>` once built)
 | `coach` | the v1 AI coach: fit a squad into a formation and play it |
 | `init` | write an editable example match-setup file |
 
-The web watch-view (edit both teams' formations, run the sim, watch a canvas replay):
+The web watch-view (edit both teams' formations, run the sim, watch a canvas replay) runs the *same UI* two ways:
 
 ```
-cargo run -p tithe-web      # then open http://127.0.0.1:8770/
+# Dev: native sim behind a local axum server (fast to iterate)
+cargo run -p tithe-web                # then open http://127.0.0.1:8770/
+
+# Web demo: the sim compiled to WASM, running in the page — no server backend
+./crates/tithe-wasm/build-demo.sh     # builds the WASM, serves the static files
 ```
+
+The page picks its backend automatically: in-page WASM if present (the static/desktop build), else the dev server's `/api`. The sim is a pure function of `(inputs, seed)`, so both produce byte-identical results. Desktop (Tauri, native sim) is the eventual third target — same UI again.
 

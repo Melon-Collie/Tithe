@@ -1,0 +1,16 @@
+[package]
+name = "tithe-replay"
+description = "Render-boundary export for Tithe: turn a MatchSetup + seed into the JSON the canvas viewer/editor consume. A consumer of the sim's event stream, shared by the web server (native) and WASM front ends — never part of the sim."
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# A consumer, not the sim core — floats and serialization live here, never in
+# tithe-sim. Fx -> f32 happens at this boundary.
+tithe-sim = { path = "../tithe-sim" }
+serde = { version = "1", features = ["derive"] }
