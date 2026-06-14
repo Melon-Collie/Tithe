@@ -1,0 +1,19 @@
+# Keep Cargo dependencies and GitHub Actions current. Weekly, grouped so a
+# refresh is one PR rather than a flood.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

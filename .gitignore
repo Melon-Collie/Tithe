@@ -38,3 +38,6 @@ Thumbs.db
 # --- Logs ---
 *.log
 npm-debug.log*
+
+# --- Claude Code local overrides (shared config + hooks are committed) ---
+.claude/settings.local.json
