@@ -27,6 +27,7 @@ mod init;
 mod log;
 mod possession;
 mod replay;
+mod scout;
 mod season;
 mod stats;
 mod tournament;
@@ -48,6 +49,7 @@ fn main() {
         Some("career") => career::run(&args[2..]),
         Some("season") => season::run(&args[2..]),
         Some("develop") => develop::run(&args[2..]),
+        Some("scout") => scout::run(&args[2..]),
         Some("init") => init::run(&args[2..]),
         _ => {
             eprintln!("usage:");
@@ -69,6 +71,9 @@ fn main() {
             );
             eprintln!(
                 "  tithe develop    [--seed N] [--seasons N]   # age a squad, show growth & decline"
+            );
+            eprintln!(
+                "  tithe scout      [--seed N] [--seasons N]   # scouting reports (fuzzy bands)"
             );
             eprintln!("  tithe init     [--out FILE]   # write an editable example setup");
             std::process::exit(2);
