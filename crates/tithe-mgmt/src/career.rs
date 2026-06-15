@@ -15,6 +15,7 @@
 
 use crate::club::{Club, Tactics};
 use crate::player::{Player, PlayerId, Ratings};
+use crate::season::{Schedule, Season, Standing};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use tithe_sim::setup::{FormationSpec, TeamSetup};
@@ -52,7 +53,12 @@ pub struct Career {
     /// [`free_agents`]: Career::free_agents
     pub players: Vec<Player>,
     pub clubs: Vec<Club>,
+    /// Matches played **outside** a season (exhibitions / friendlies), in play
+    /// order. Season fixtures live on the [`Season`]; both share one monotonic
+    /// match index for seed derivation (see `match_index`).
     pub history: Vec<MatchRecord>,
+    /// The season in progress, if one has been started.
+    season: Option<Season>,
 }
 
 /// A player to add to the pool — everything but the id, which the career mints so
@@ -98,6 +104,7 @@ impl Career {
             players: Vec::new(),
             clubs: Vec::new(),
             history: Vec::new(),
+            season: None,
         }
     }
 
@@ -213,15 +220,68 @@ impl Career {
             .collect()
     }
 
-    /// Play `home` vs `away`, record the outcome, and return it. The match seed is
-    /// derived from the career seed and the current match index, so replaying a
-    /// career (same seed, same fixtures in the same order) reproduces every result.
+    /// Play an **exhibition** `home` vs `away`, record it to `history`, and return
+    /// it. (For league play, start a season and use
+    /// [`play_next_fixture`](Career::play_next_fixture).) The match seed is derived
+    /// from the career seed and the running match index, so replaying a career
+    /// (same seed, same matches in the same order) reproduces every result.
     pub fn play(&mut self, home: usize, away: usize) -> MatchResult {
-        let seed = derive_seed(self.seed, self.history.len() as u64);
-        let setup = self.build_match_setup(home, away);
-        let result = play_setup(&setup, seed, home, away);
+        let result = self.play_fixture(home, away);
         self.history.push(result.record.clone());
         result
+    }
+
+    /// Generate a round-robin schedule over the current clubs and make it the
+    /// active season (replacing any in progress). `double` plays each pairing home
+    /// and away. Needs at least two clubs to produce fixtures.
+    pub fn start_season(&mut self, double: bool) {
+        let schedule = Schedule::round_robin(self.clubs.len(), double);
+        self.season = Some(Season::new(schedule));
+    }
+
+    /// Play the next unplayed fixture of the active season, recording it on the
+    /// season, or `None` if there is no season or it is already complete.
+    pub fn play_next_fixture(&mut self) -> Option<MatchResult> {
+        let fixture = self.season.as_ref()?.next_fixture()?;
+        let result = self.play_fixture(fixture.home, fixture.away);
+        self.season
+            .as_mut()
+            .expect("season present")
+            .record(result.record.clone());
+        Some(result)
+    }
+
+    /// Play out the rest of the active season's fixtures, in schedule order.
+    pub fn play_season(&mut self) {
+        while self.play_next_fixture().is_some() {}
+    }
+
+    /// The active season, if one has been started.
+    pub fn season(&self) -> Option<&Season> {
+        self.season.as_ref()
+    }
+
+    /// The current league table (best club first), or empty if no season exists.
+    pub fn standings(&self) -> Vec<Standing> {
+        self.season
+            .as_ref()
+            .map_or_else(Vec::new, |s| s.standings(self.clubs.len()))
+    }
+
+    /// Build and run one matchup without recording it. The seed comes from the
+    /// running match index, so exhibitions and season fixtures alike get unique,
+    /// reproducible seeds. The caller records the result where it belongs.
+    fn play_fixture(&self, home: usize, away: usize) -> MatchResult {
+        let seed = derive_seed(self.seed, self.match_index());
+        let setup = self.build_match_setup(home, away);
+        play_setup(&setup, seed, home, away)
+    }
+
+    /// How many matches have been played so far (exhibitions plus season
+    /// fixtures) — the index the next match's seed derives from.
+    fn match_index(&self) -> u64 {
+        let season_played = self.season.as_ref().map_or(0, |s| s.results.len());
+        (self.history.len() + season_played) as u64
     }
 
     /// Project two clubs into a single [`MatchSetup`]: each club's formations are
@@ -472,5 +532,83 @@ mod tests {
         assert_eq!(json, serde_json::to_string(&back).unwrap());
         assert_eq!(back.history.len(), 1);
         assert_eq!(back.free_agents().len(), 2);
+    }
+
+    /// A built league plays a full single round-robin and every fixture lands in
+    /// the table: each of N clubs plays N-1 games and the table is win-sorted.
+    #[test]
+    fn season_plays_every_fixture_into_a_full_table() {
+        let mut career = Career::new(11);
+        for name in ["A", "B", "C", "D"] {
+            career.add_generated_club(name);
+        }
+        career.start_season(false);
+        career.play_season();
+
+        let season = career.season().expect("season started");
+        assert!(season.is_complete());
+        assert_eq!(season.results.len(), 4 * 3 / 2); // 6 fixtures
+
+        let table = career.standings();
+        assert_eq!(table.len(), 4);
+        // Every club played all three opponents once.
+        assert!(table.iter().all(|s| s.played == 3));
+        // Total wins across the table equals the number of decisive matches.
+        let decisive = season.results.iter().filter(|r| r.winner.is_some()).count();
+        assert_eq!(table.iter().map(|s| s.won).sum::<u32>(), decisive as u32);
+        // The table is sorted: wins non-increasing.
+        assert!(table.windows(2).all(|w| w[0].won >= w[1].won));
+    }
+
+    #[test]
+    fn season_is_reproducible_from_the_seed() {
+        let build = |seed| {
+            let mut c = Career::new(seed);
+            for name in ["A", "B", "C", "D"] {
+                c.add_generated_club(name);
+            }
+            c.start_season(true);
+            c.play_season();
+            c
+        };
+        let a = build(8);
+        let b = build(8);
+        assert_eq!(
+            serde_json::to_string(&a).unwrap(),
+            serde_json::to_string(&b).unwrap()
+        );
+    }
+
+    #[test]
+    fn season_survives_a_serde_round_trip_and_resumes() {
+        let mut career = Career::new(2);
+        for name in ["A", "B", "C", "D"] {
+            career.add_generated_club(name);
+        }
+        career.start_season(false);
+        career.play_next_fixture();
+        career.play_next_fixture(); // partway through
+
+        let json = serde_json::to_string(&career).unwrap();
+        let mut back: Career = serde_json::from_str(&json).unwrap();
+        assert_eq!(json, serde_json::to_string(&back).unwrap());
+        // The reloaded season resumes and completes.
+        assert!(!back.season().unwrap().is_complete());
+        back.play_season();
+        assert!(back.season().unwrap().is_complete());
+    }
+
+    #[test]
+    fn exhibitions_and_season_fixtures_share_one_seed_index() {
+        let mut career = Career::new(4);
+        career.add_generated_club("A");
+        career.add_generated_club("B");
+        let exhibition = career.play(0, 1).record.seed; // index 0
+        career.start_season(false);
+        let fixture = career.play_next_fixture().unwrap().record.seed; // index 1
+        assert_ne!(
+            exhibition, fixture,
+            "the season fixture advances past the exhibition"
+        );
     }
 }

@@ -9,7 +9,7 @@
 use tithe_mgmt::{Career, Club};
 
 /// Club names drawn on in order when building a league larger than the default.
-const LEAGUE_NAMES: &[&str] = &[
+pub(crate) const LEAGUE_NAMES: &[&str] = &[
     "Embers", "Wardens", "Cinders", "Wraiths", "Pyres", "Vigils", "Hollows", "Beacons",
 ];
 
