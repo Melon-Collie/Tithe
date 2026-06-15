@@ -1,8 +1,9 @@
 //! # tithe-mgmt
 //!
 //! The **management layer**: the GM-coach loop that lives *around* a match.
-//! Persistent players, the clubs that hold them, and a [`Career`] that pairs
-//! clubs into matchups, hands them to the sim, and folds the results back in.
+//! Persistent players, the clubs that field them, a [`Season`] that schedules
+//! them into a round-robin and tallies a table, and a [`Career`] that holds it
+//! all — handing matchups to the sim and folding the results back in.
 //!
 //! ## The seam (load-bearing)
 //!
@@ -44,7 +45,9 @@
 pub mod career;
 pub mod club;
 pub mod player;
+pub mod season;
 
 pub use career::{Career, MatchRecord, MatchResult, NewPlayer};
 pub use club::{Club, Tactics};
 pub use player::{Player, PlayerId, Ratings};
+pub use season::{Fixture, Schedule, Season, Standing};

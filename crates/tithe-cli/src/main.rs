@@ -26,6 +26,7 @@ mod init;
 mod log;
 mod possession;
 mod replay;
+mod season;
 mod stats;
 mod tournament;
 mod validate;
@@ -44,6 +45,7 @@ fn main() {
         Some("tournament") => tournament::run(&args[2..]),
         Some("coach") => coach::run(&args[2..]),
         Some("career") => career::run(&args[2..]),
+        Some("season") => season::run(&args[2..]),
         Some("init") => init::run(&args[2..]),
         _ => {
             eprintln!("usage:");
@@ -58,7 +60,10 @@ fn main() {
             eprintln!("  tithe tournament [--matches N] [--seed N]   # archetype round-robin");
             eprintln!("  tithe coach      [--seed N]   # AI coach: fit a squad to a template");
             eprintln!(
-                "  tithe career     [--seed N] [--out FILE]   # demo career: play a match, save it"
+                "  tithe career     [--seed N] [--clubs N] [--free-agents N] [--out FILE]   # demo career"
+            );
+            eprintln!(
+                "  tithe season     [--seed N] [--clubs N] [--double] [--out FILE]   # play a season, print the table"
             );
             eprintln!("  tithe init     [--out FILE]   # write an editable example setup");
             std::process::exit(2);
