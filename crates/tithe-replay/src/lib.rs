@@ -101,6 +101,7 @@ pub struct AgentAttrs {
     pub pos: u32,
     pub pace: u32,
     pub awr: u32,
+    pub end: u32,
 }
 
 #[derive(Serialize)]
@@ -242,6 +243,7 @@ pub fn build_export(
                 pos: pct(at.positioning),
                 pace: pct(at.pace),
                 awr: pct(at.awareness),
+                end: pct(at.endurance),
             },
         });
     }

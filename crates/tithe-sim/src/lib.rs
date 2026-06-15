@@ -496,6 +496,7 @@ impl Simulation {
         let pace_span = self.config.pace_ceil - self.config.pace_floor;
         let drain_base = self.config.stamina_drain_base;
         let drain_per_unit = self.config.stamina_drain_per_unit;
+        let endurance_floor = self.config.endurance_drain_floor;
         let one = Fx::from_num(1);
         let zero = Fx::from_num(0);
 
@@ -510,7 +511,10 @@ impl Simulation {
                 let from = self.agents[i].pos;
                 let to = world::step_toward(from, self.agents[i].target, speed);
                 self.agents[i].pos = to;
-                let drain = drain_base + drain_per_unit * from.distance_to(to);
+                // Drain, slowed by Endurance: an engine burns the same effort cheaper.
+                let endurance_mult =
+                    one - (one - endurance_floor) * self.agents[i].attributes.endurance;
+                let drain = (drain_base + drain_per_unit * from.distance_to(to)) * endurance_mult;
                 self.agents[i].stamina = (self.agents[i].stamina - drain).max(zero);
             }
         }
@@ -1185,7 +1189,12 @@ impl Simulation {
             agent.pos = agent.anchor;
             agent.target = agent.anchor;
             agent.stagger = 0;
-            agent.stamina = Fx::from_num(1); // fresh unit each soul (subs between souls)
+            // Partial, Endurance-scaled recovery (replaces the old full reset), so
+            // fatigue accumulates across a match and a low-Endurance worker fades
+            // late while an engine stays fresh. Capped at full.
+            let recovery =
+                self.config.recovery_base + self.config.recovery_gain * agent.attributes.endurance;
+            agent.stamina = (agent.stamina + recovery).min(Fx::from_num(1));
         }
     }
 

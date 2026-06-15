@@ -100,6 +100,7 @@ impl Club {
                     positioning: r.positioning,
                     pace: r.pace,
                     awareness: r.awareness,
+                    endurance: r.endurance,
                 }
             })
             .collect();

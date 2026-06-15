@@ -28,6 +28,7 @@ pub struct Ratings {
     pub positioning: u8,
     pub pace: u8,
     pub awareness: u8,
+    pub endurance: u8,
 }
 
 impl Ratings {
@@ -35,7 +36,7 @@ impl Ratings {
     /// → named mapping in this crate; it keys off the sim's `Attribute` SSOT, so a
     /// reorder there is caught by `tithe-sim`'s own `attribute_keys_match_fields`
     /// test rather than silently misaligning here.
-    pub fn from_canonical(a: [u8; 9]) -> Self {
+    pub fn from_canonical(a: [u8; 10]) -> Self {
         Ratings {
             accuracy: a[Attribute::Accuracy as usize],
             range: a[Attribute::Range as usize],
@@ -46,6 +47,7 @@ impl Ratings {
             positioning: a[Attribute::Positioning as usize],
             pace: a[Attribute::Pace as usize],
             awareness: a[Attribute::Awareness as usize],
+            endurance: a[Attribute::Endurance as usize],
         }
     }
 
@@ -54,12 +56,12 @@ impl Ratings {
     /// sniper, a checker, a passer). Deterministic from the threaded [`Rng`].
     /// A placeholder for the real archetype-first generation (design doc §4).
     fn generate(rng: &mut Rng) -> Self {
-        let mut a = [0u8; 9];
+        let mut a = [0u8; 10];
         for v in a.iter_mut() {
             *v = 30 + rng.below(40) as u8; // 30..70
         }
         for _ in 0..1 + rng.below(2) {
-            a[rng.below(9) as usize] = 80 + rng.below(20) as u8; // a spike or two
+            a[rng.below(10) as usize] = 80 + rng.below(20) as u8; // a spike or two
         }
         Ratings::from_canonical(a)
     }
@@ -110,6 +112,7 @@ mod tests {
             r.positioning,
             r.pace,
             r.awareness,
+            r.endurance,
         ] {
             assert!(v <= 100, "rating {v} out of range");
         }
@@ -120,10 +123,11 @@ mod tests {
     fn from_canonical_maps_each_attribute_to_its_field() {
         // Encode each attribute's canonical index as its value, then assert the
         // named field picked up the value at that index.
-        let a: [u8; 9] = std::array::from_fn(|i| i as u8);
+        let a: [u8; 10] = std::array::from_fn(|i| i as u8);
         let r = Ratings::from_canonical(a);
         assert_eq!(r.accuracy, Attribute::Accuracy as u8);
         assert_eq!(r.awareness, Attribute::Awareness as u8);
         assert_eq!(r.positioning, Attribute::Positioning as u8);
+        assert_eq!(r.endurance, Attribute::Endurance as u8);
     }
 }

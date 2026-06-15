@@ -157,6 +157,19 @@ pub struct SimConfig {
     pub stamina_drain_per_unit: Fx,
     /// Speed multiplier at empty stamina (full stamina = 1.0). Gassed = slower.
     pub stamina_speed_floor: Fx,
+    /// Drain multiplier at **Endurance 1** (vs 1.0 at Endurance 0): drain is scaled
+    /// by `1 − (1 − floor)·Endurance`, so a high-Endurance engine burns stamina
+    /// slower. `1` makes Endurance ignore drain.
+    pub endurance_drain_floor: Fx,
+    /// Stamina recovered **between rounds** at Endurance 0 — the base of the
+    /// partial recovery that replaced the old full reset. Set below a round's
+    /// typical drain so a hard-working low-Endurance player accumulates fatigue
+    /// over a match (the "play longer" lever).
+    pub recovery_base: Fx,
+    /// Extra between-round recovery per unit of Endurance (added to `recovery_base`,
+    /// ×Endurance). A high-Endurance player recovers ~fully each round; a low one
+    /// fades. Recovery is capped at full (1.0).
+    pub recovery_gain: Fx,
     /// Speed multiplier at Pace 0 and Pace 1 — a player's top speed is
     /// interpolated between these (Pace 0.5 ≈ the average 1.0).
     pub pace_floor: Fx,
@@ -304,10 +317,13 @@ impl Default for SimConfig {
             stamina_drain_base: Fx::from_num(5) / Fx::from_num(10000), // 0.0005
             stamina_drain_per_unit: Fx::from_num(25) / Fx::from_num(10000), // 0.0025
             stamina_speed_floor: Fx::from_num(55) / Fx::from_num(100), // 0.55
-            pace_floor: Fx::from_num(75) / Fx::from_num(100),         // 0.75 (Pace 0)
-            pace_ceil: Fx::from_num(125) / Fx::from_num(100),         // 1.25 (Pace 1)
-            footprint_edge_softness: Fx::from_num(3),                 // firm but soft at the edge
-            footprint_edge_max: Fx::from_num(4), // never stray past 2× the radius
+            endurance_drain_floor: Fx::from_num(5) / Fx::from_num(10), // End 1 ⇒ ½ drain
+            recovery_base: Fx::from_num(3) / Fx::from_num(10), // End 0 recovers +0.30/round (< typical drain ~0.46)
+            recovery_gain: Fx::from_num(6) / Fx::from_num(10), // End 1 recovers +0.90/round (≈ full)
+            pace_floor: Fx::from_num(75) / Fx::from_num(100),  // 0.75 (Pace 0)
+            pace_ceil: Fx::from_num(125) / Fx::from_num(100),  // 1.25 (Pace 1)
+            footprint_edge_softness: Fx::from_num(3),          // firm but soft at the edge
+            footprint_edge_max: Fx::from_num(4),               // never stray past 2× the radius
             carry_tether_floor: Fx::from_num(6) / Fx::from_num(10), // 0.6 — reluctance, not refusal
             positioning_ball_pull: Fx::from_num(8) / Fx::from_num(10), // 0.8 pull at Positioning 0
             positioning_spacing: Fx::from_num(2) / Fx::from_num(10), // 0.2 — A/B off vs on
@@ -419,12 +435,12 @@ impl Formation {
     }
 }
 
-/// The nine player attributes in their **canonical order** — the one source of
+/// The ten player attributes in their **canonical order** — the one source of
 /// truth for any code that must iterate or index attributes positionally rather
 /// than name them (the coach's role-want vectors, scout summaries, the
 /// management UI's stat columns). The discriminant doubles as that index, so
 /// `Attribute::Handling as usize` is the slot Handling occupies in any
-/// `[_; 9]` attribute array. Keep this in lockstep with the fields of
+/// `[_; 10]` attribute array. Keep this in lockstep with the fields of
 /// [`Attributes`] and [`PlayerSetup`]; the `attribute_keys_match_fields` test
 /// fails loudly if they ever drift, so a reorder can't silently misalign.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -438,12 +454,13 @@ pub enum Attribute {
     Positioning,
     Pace,
     Awareness,
+    Endurance,
 }
 
 impl Attribute {
     /// Every attribute in canonical order — drive positional loops off this
-    /// rather than hand-writing `0..9`, so the order lives in exactly one place.
-    pub const ALL: [Attribute; 9] = [
+    /// rather than hand-writing `0..10`, so the order lives in exactly one place.
+    pub const ALL: [Attribute; 10] = [
         Attribute::Accuracy,
         Attribute::Range,
         Attribute::Handling,
@@ -453,6 +470,7 @@ impl Attribute {
         Attribute::Positioning,
         Attribute::Pace,
         Attribute::Awareness,
+        Attribute::Endurance,
     ];
 
     /// Short scout/box-score label.
@@ -467,6 +485,7 @@ impl Attribute {
             Attribute::Positioning => "Pos",
             Attribute::Pace => "Pace",
             Attribute::Awareness => "Awr",
+            Attribute::Endurance => "End",
         }
     }
 }
@@ -508,6 +527,11 @@ pub struct Attributes {
     /// positions (worse the further away), so he shades wrong, blows assignments,
     /// and throws into coverage he didn't see (§2). The genius layer.
     pub awareness: Fx,
+    /// Conditioning — how slowly the player burns stamina and how much he recovers
+    /// between rounds. A high-Endurance "engine" stays fresh and fades little over
+    /// a match; a low one drains fast and accumulates fatigue late (see
+    /// `advance_motion` drain and `reset_for_next_soul` recovery).
+    pub endurance: Fx,
 }
 
 impl Attributes {
@@ -525,6 +549,7 @@ impl Attributes {
             positioning: mid,
             pace: mid,
             awareness: mid,
+            endurance: mid,
         }
     }
 
@@ -543,6 +568,7 @@ impl Attributes {
             positioning: draw_attribute(rng),
             pace: draw_attribute(rng),
             awareness: draw_attribute(rng),
+            endurance: draw_attribute(rng),
         }
     }
 
@@ -560,6 +586,7 @@ impl Attributes {
             Attribute::Positioning => self.positioning,
             Attribute::Pace => self.pace,
             Attribute::Awareness => self.awareness,
+            Attribute::Endurance => self.endurance,
         }
     }
 }
