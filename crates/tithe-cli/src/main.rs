@@ -22,6 +22,7 @@
 mod boxscore;
 mod career;
 mod coach;
+mod develop;
 mod init;
 mod log;
 mod possession;
@@ -46,6 +47,7 @@ fn main() {
         Some("coach") => coach::run(&args[2..]),
         Some("career") => career::run(&args[2..]),
         Some("season") => season::run(&args[2..]),
+        Some("develop") => develop::run(&args[2..]),
         Some("init") => init::run(&args[2..]),
         _ => {
             eprintln!("usage:");
@@ -64,6 +66,9 @@ fn main() {
             );
             eprintln!(
                 "  tithe season     [--seed N] [--clubs N] [--double] [--out FILE]   # play a season, print the table"
+            );
+            eprintln!(
+                "  tithe develop    [--seed N] [--seasons N]   # age a squad, show growth & decline"
             );
             eprintln!("  tithe init     [--out FILE]   # write an editable example setup");
             std::process::exit(2);
