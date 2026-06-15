@@ -49,11 +49,35 @@ impl Ratings {
         }
     }
 
-    /// Generate a varied player: a `30..70` baseline with one or two attributes
+    /// Read one rating by its canonical [`Attribute`] key — the named bridge for
+    /// code that iterates attributes (development, scouting summaries).
+    pub fn get(&self, a: Attribute) -> u8 {
+        match a {
+            Attribute::Accuracy => self.accuracy,
+            Attribute::Range => self.range,
+            Attribute::Handling => self.handling,
+            Attribute::Stripping => self.stripping,
+            Attribute::Contesting => self.contesting,
+            Attribute::Passing => self.passing,
+            Attribute::Positioning => self.positioning,
+            Attribute::Pace => self.pace,
+            Attribute::Awareness => self.awareness,
+        }
+    }
+
+    /// The mean of the nine ratings — a single legible "how good is he" number for
+    /// summaries and tests. Not a sim input (the sim reads each attribute).
+    pub fn overall(&self) -> u8 {
+        let sum: u32 = Attribute::ALL.iter().map(|&a| self.get(a) as u32).sum();
+        (sum / 9) as u8
+    }
+
+    /// Generate a varied ceiling: a `30..70` baseline with one or two attributes
     /// spiked to `80..100`, so each generated player has a readable identity (a
-    /// sniper, a checker, a passer). Deterministic from the threaded [`Rng`].
-    /// A placeholder for the real archetype-first generation (design doc §4).
-    fn generate(rng: &mut Rng) -> Self {
+    /// sniper, a checker, a passer) — this is his *potential* shape (his "grain").
+    /// Deterministic from the threaded [`Rng`]. A placeholder for the real
+    /// archetype-first generation (design doc §4).
+    pub(crate) fn generate(rng: &mut Rng) -> Self {
         let mut a = [0u8; 9];
         for v in a.iter_mut() {
             *v = 30 + rng.below(40) as u8; // 30..70
@@ -65,27 +89,53 @@ impl Ratings {
     }
 }
 
-/// A persistent player: stable identity, a name, an age, and intrinsic
-/// [`Ratings`]. Roles and formation are *not* here — those are the coach's
-/// per-match inputs (see [`crate::club::Tactics`]), not properties of the player.
+/// A persistent player: stable identity, a name, an age, his current
+/// [`Ratings`], the ceiling those grow toward ([`potential`](Player::potential)),
+/// and his [`development_risk`](Player::development_risk). Roles and formation are
+/// *not* here — those are the coach's per-match inputs (see
+/// [`crate::club::Tactics`]), not properties of the player.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Player {
     pub id: PlayerId,
     pub name: String,
     pub age: u8,
+    /// What he can do *now* — the values the sim consumes.
     pub ratings: Ratings,
+    /// The per-attribute **ceiling** his ratings grow toward (his lifetime peak,
+    /// fixed at generation). Current rises toward it when young and falls away
+    /// from it in decline, so the current/ceiling gap means "headroom" for a
+    /// prospect and "what's been lost" for a veteran (design doc §3).
+    pub potential: Ratings,
+    /// His own developmental volatility (`0..=100`, aleatoric — a property of
+    /// *him*, not of scouting). Higher means his yearly progression swings more,
+    /// so high-risk prospects boom or bust while low-risk ones track projection.
+    pub development_risk: u8,
 }
 
 impl Player {
-    /// Generate a player with the given identity and name. Age is drawn in a
-    /// plausible `18..=32` window. Deterministic from the threaded [`Rng`].
+    /// Generate a player with the given identity and name. Draws a ceiling and an
+    /// age, then **ages him up** from 18 through the default development model, so
+    /// a generated veteran is a coherent, declined version of his own peak rather
+    /// than random numbers. Deterministic from the threaded [`Rng`].
     pub fn generate(id: PlayerId, name: &str, rng: &mut Rng) -> Self {
-        Player {
+        let model = crate::development::DevelopmentModel::default();
+        let target_age = 18 + rng.below(15) as u8; // 18..=32
+        let potential = Ratings::generate(rng);
+        let development_risk = rng.below(101) as u8;
+        // Born raw at 18, then lived forward to his current age via the same
+        // model that ages everyone — booms and busts already baked in.
+        let mut player = Player {
             id,
             name: name.to_string(),
-            age: 18 + rng.below(15) as u8, // 18..=32
-            ratings: Ratings::generate(rng),
+            ratings: model.youth_ratings(&potential),
+            potential,
+            development_risk,
+            age: 18,
+        };
+        while player.age < target_age {
+            model.advance(&mut player, rng);
         }
+        player
     }
 }
 

@@ -14,6 +14,7 @@
 //! [`tithe_sim::BoxScore`] (which deployment-based development will later read).
 
 use crate::club::{Club, Tactics};
+use crate::development::DevelopmentModel;
 use crate::player::{Player, PlayerId, Ratings};
 use crate::season::{Schedule, Season, Standing};
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,7 @@ const MAX_TICKS: u64 = 100_000;
 /// career seed never share a stream (they seed the seed for different purposes).
 const CLUB_SEED_SALT: u64 = 0xC1AB_5EED_C1AB_5EED;
 const FREE_AGENT_SEED_SALT: u64 = 0xF4EE_A9E7_F4EE_A9E7;
+const DEVELOPMENT_SEED_SALT: u64 = 0xDE7E_109D_DE7E_109D;
 
 /// The number of players in a generated club. The default tactics are seven-a-side
 /// (design doc's initial team size), so generated rosters match that shape.
@@ -59,6 +61,12 @@ pub struct Career {
     pub history: Vec<MatchRecord>,
     /// The season in progress, if one has been started.
     season: Option<Season>,
+    /// How many development years have elapsed (each [`advance_season`] call) —
+    /// the index that seeds each year's per-player development, so aging is
+    /// reproducible.
+    ///
+    /// [`advance_season`]: Career::advance_season
+    seasons_advanced: u32,
 }
 
 /// A player to add to the pool — everything but the id, which the career mints so
@@ -105,6 +113,7 @@ impl Career {
             clubs: Vec::new(),
             history: Vec::new(),
             season: None,
+            seasons_advanced: 0,
         }
     }
 
@@ -179,14 +188,19 @@ impl Career {
     }
 
     /// Pool one authored player, minting its id. The single place an authored
-    /// player enters the world.
+    /// player enters the world. An authored player is taken as *finished* — his
+    /// potential equals his current ratings and his development risk is zero — so
+    /// what you author is exactly what you get (development can be set explicitly
+    /// afterward via the pool if a test wants a prospect).
     fn add_player(&mut self, p: NewPlayer) -> PlayerId {
         let id = self.mint_id();
         self.players.push(Player {
             id,
             name: p.name,
             age: p.age,
+            potential: p.ratings.clone(),
             ratings: p.ratings,
+            development_risk: 0,
         });
         id
     }
@@ -254,6 +268,25 @@ impl Career {
     /// Play out the rest of the active season's fixtures, in schedule order.
     pub fn play_season(&mut self) {
         while self.play_next_fixture().is_some() {}
+    }
+
+    /// Advance every pooled player one development year (a season's aging): the
+    /// young grow toward their ceilings, the old decline shape-first, each
+    /// perturbed by his own risk (design doc §6; see [`DevelopmentModel`]). Each
+    /// player is seeded from the career seed, the development year, and his id, so
+    /// aging is reproducible and independent of pool order. Does not touch the
+    /// match schedule — call it when a season ends to roll the league forward.
+    pub fn advance_season(&mut self) {
+        let model = DevelopmentModel::default();
+        let year_seed = derive_seed(
+            self.seed ^ DEVELOPMENT_SEED_SALT,
+            self.seasons_advanced as u64,
+        );
+        for player in &mut self.players {
+            let mut rng = Rng::new(derive_seed(year_seed, player.id.0 as u64));
+            model.advance(player, &mut rng);
+        }
+        self.seasons_advanced += 1;
     }
 
     /// The active season, if one has been started.
@@ -596,6 +629,32 @@ mod tests {
         assert!(!back.season().unwrap().is_complete());
         back.play_season();
         assert!(back.season().unwrap().is_complete());
+    }
+
+    #[test]
+    fn advancing_seasons_ages_the_whole_pool_reproducibly() {
+        let build = |seed| {
+            let mut c = Career::new(seed);
+            c.add_generated_club("Embers");
+            c.add_free_agents(3);
+            c
+        };
+        let mut a = build(5);
+        let ages_before: Vec<u8> = a.players.iter().map(|p| p.age).collect();
+        a.advance_season();
+        a.advance_season();
+        // Everyone — affiliated and free agents — aged by the number of advances.
+        for (p, before) in a.players.iter().zip(&ages_before) {
+            assert_eq!(p.age, before + 2);
+        }
+        // Aging is reproducible from the seed and independent of pool order.
+        let mut b = build(5);
+        b.advance_season();
+        b.advance_season();
+        assert_eq!(
+            serde_json::to_string(&a).unwrap(),
+            serde_json::to_string(&b).unwrap()
+        );
     }
 
     #[test]
