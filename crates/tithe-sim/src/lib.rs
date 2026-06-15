@@ -680,6 +680,16 @@ impl Simulation {
             .filter(|&j| teams[j] != team)
             .map(|j| perceived[j])
             .collect();
+        // Parallel to `p_enemies`: each enemy's Positioning, so the carry route can
+        // weight a defender's obstacle value by how well he holds the line — a
+        // well-positioned defender is a real wall to route around, a poor one gets
+        // driven past. This is the mechanism that makes containment scale with
+        // Positioning (the contained carrier slips a sloppy defender's straight
+        // route, but not a disciplined one's).
+        let p_enemy_pos_skill: Vec<Fx> = (0..n)
+            .filter(|&j| teams[j] != team)
+            .map(|j| self.agents[j].attributes.positioning)
+            .collect();
         let p_allies: Vec<Vec2> = (0..n)
             .filter(|&j| teams[j] == team)
             .map(|j| perceived[j])
@@ -710,6 +720,7 @@ impl Simulation {
             my_goal,
             enemy_goal,
             &p_enemies,
+            &p_enemy_pos_skill,
             &p_allies,
             bias.carry_mult * carry_tether,
         );
@@ -855,10 +866,13 @@ impl Simulation {
         my_goal: Vec2,
         enemy_goal: Vec2,
         enemies: &[Vec2],
+        enemy_pos_skill: &[Fx],
         allies: &[Vec2],
         value_mult: Fx,
     ) -> (Vec2, Fx) {
         let aversion = self.config.turnover_aversion;
+        let one = Fx::from_num(1);
+        let evade_floor = self.config.carry_evade_floor;
         let to_goal = my_goal - carrier_pos;
         let unit = to_goal.normalized();
         let look = to_goal.length().min(self.config.carry_lookahead); // don't overshoot the goal
@@ -877,17 +891,23 @@ impl Simulation {
         let mut best_ev = Fx::from_num(-9999);
         for &waypoint in &candidates {
             let value = value::value_at(waypoint, my_goal, enemies, &self.config) * value_mult;
-            // Path risk: the worst enemy sitting on the carrier→waypoint route.
+            // Path risk: the worst enemy sitting on the carrier→waypoint route,
+            // each weighted by how well he's *positioned* to be a real obstacle
+            // (`evade_floor + (1−floor)·Positioning`). A disciplined defender walls
+            // the route; a poorly-positioned one is half a body the carrier drives
+            // through — so the carrier slips sloppy containment and curves around
+            // sound containment.
             let mut path_risk = Fx::from_num(0);
-            for &enemy in enemies {
+            for (k, &enemy) in enemies.iter().enumerate() {
                 let on_path = value::segment_shadow(
                     enemy,
                     carrier_pos,
                     waypoint,
                     self.config.carry_contest_radius,
                 );
-                if on_path > path_risk {
-                    path_risk = on_path;
+                let weighted = on_path * (evade_floor + (one - evade_floor) * enemy_pos_skill[k]);
+                if weighted > path_risk {
+                    path_risk = weighted;
                 }
             }
             let cost =

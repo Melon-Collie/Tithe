@@ -46,6 +46,13 @@ pub struct SimConfig {
     /// Distance from a carry route within which a defender threatens it (the
     /// risk that routes the carrier around pressure).
     pub carry_contest_radius: Fx,
+    /// Floor on a defender's carry-route obstacle value at Positioning 0 (rising to
+    /// 1 at Positioning 1): his path-risk contribution is scaled by
+    /// `floor + (1 − floor)·Positioning`. This is the lever that makes containment
+    /// (and carry defense generally) scale with Positioning — a sound defender
+    /// walls the lane, a poorly-positioned one gets driven past. `1` = Positioning
+    /// doesn't matter here; `0` = a Positioning-0 defender is no obstacle at all.
+    pub carry_evade_floor: Fx,
     /// Strip-win percent when defender Stripping equals carrier Handling — the
     /// even-match baseline the attribute gap swings around.
     pub strip_even_pct: Fx,
@@ -238,6 +245,8 @@ impl Default for SimConfig {
             carry_lookahead: Fx::from_num(15),
             carry_lateral: Fx::from_num(6),
             carry_contest_radius: Fx::from_num(7),
+            carry_evade_floor: Fx::from_num(4) / Fx::from_num(10), // Pos 0 ⇒ 40% obstacle, Pos 1 ⇒ full
+
             strip_even_pct: Fx::from_num(50), // even Stripping vs Handling ≈ coin flip
             strip_spread_pct: Fx::from_num(60), // a 0.2 attribute edge ≈ ±12 points
             stagger_ticks: 15,
