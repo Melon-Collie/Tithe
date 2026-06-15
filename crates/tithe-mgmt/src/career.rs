@@ -201,6 +201,7 @@ impl Career {
             potential: p.ratings.clone(),
             ratings: p.ratings,
             development_risk: 0,
+            season_usage: crate::development::Usage::default(),
         });
         id
     }
@@ -241,6 +242,7 @@ impl Career {
     /// (same seed, same matches in the same order) reproduces every result.
     pub fn play(&mut self, home: usize, away: usize) -> MatchResult {
         let result = self.play_fixture(home, away);
+        self.accumulate_usage(home, away, &result.box_score);
         self.history.push(result.record.clone());
         result
     }
@@ -258,11 +260,27 @@ impl Career {
     pub fn play_next_fixture(&mut self) -> Option<MatchResult> {
         let fixture = self.season.as_ref()?.next_fixture()?;
         let result = self.play_fixture(fixture.home, fixture.away);
+        self.accumulate_usage(fixture.home, fixture.away, &result.box_score);
         self.season
             .as_mut()
             .expect("season present")
             .record(result.record.clone());
         Some(result)
+    }
+
+    /// Fold a played match's box score into the involved players' season usage, so
+    /// [`advance_season`](Career::advance_season) can bias each player's growth
+    /// toward what he actually did. Agent ids run the home roster then the away
+    /// roster (team-0-first, the projection's ordering).
+    fn accumulate_usage(&mut self, home: usize, away: usize, box_score: &BoxScore) {
+        let mut roster_ids: Vec<PlayerId> = Vec::with_capacity(box_score.players.len());
+        roster_ids.extend(self.clubs[home].roster.iter().copied());
+        roster_ids.extend(self.clubs[away].roster.iter().copied());
+        for (id, line) in roster_ids.iter().zip(&box_score.players) {
+            if let Some(player) = self.players.iter_mut().find(|p| p.id == *id) {
+                player.season_usage.add_line(line);
+            }
+        }
     }
 
     /// Play out the rest of the active season's fixtures, in schedule order.
@@ -271,11 +289,13 @@ impl Career {
     }
 
     /// Advance every pooled player one development year (a season's aging): the
-    /// young grow toward their ceilings, the old decline shape-first, each
-    /// perturbed by his own risk (design doc §6; see [`DevelopmentModel`]). Each
-    /// player is seeded from the career seed, the development year, and his id, so
-    /// aging is reproducible and independent of pool order. Does not touch the
-    /// match schedule — call it when a season ends to roll the league forward.
+    /// young grow toward their ceilings — **biased toward the attributes they
+    /// were deployed to use** (design doc §6) — the old decline shape-first, each
+    /// perturbed by his own risk (see [`DevelopmentModel`]). Each player's season
+    /// usage is consumed and reset here. Players are seeded from the career seed,
+    /// the development year, and their id, so aging is reproducible and
+    /// independent of pool order. Does not touch the match schedule — call it when
+    /// a season ends to roll the league forward.
     pub fn advance_season(&mut self) {
         let model = DevelopmentModel::default();
         let year_seed = derive_seed(
@@ -283,8 +303,10 @@ impl Career {
             self.seasons_advanced as u64,
         );
         for player in &mut self.players {
+            // Take the season's deployment record (resetting it for next season).
+            let usage = std::mem::take(&mut player.season_usage);
             let mut rng = Rng::new(derive_seed(year_seed, player.id.0 as u64));
-            model.advance(player, &mut rng);
+            model.advance(player, &usage, &mut rng);
         }
         self.seasons_advanced += 1;
     }

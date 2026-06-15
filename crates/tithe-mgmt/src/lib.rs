@@ -50,6 +50,6 @@ pub mod season;
 
 pub use career::{Career, MatchRecord, MatchResult, NewPlayer};
 pub use club::{Club, Tactics};
-pub use development::DevelopmentModel;
+pub use development::{DevelopmentModel, Usage};
 pub use player::{Player, PlayerId, Ratings};
 pub use season::{Fixture, Schedule, Season, Standing};

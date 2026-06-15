@@ -2,6 +2,7 @@
 //! consumes. A [`Player`] is *career* state; the sim's per-match agent is built
 //! from it at matchup time (see [`crate::club::Club::to_team_setup`]).
 
+use crate::development::Usage;
 use serde::{Deserialize, Serialize};
 use tithe_sim::{Attribute, Rng};
 
@@ -110,6 +111,13 @@ pub struct Player {
     /// *him*, not of scouting). Higher means his yearly progression swings more,
     /// so high-risk prospects boom or bust while low-risk ones track projection.
     pub development_risk: u8,
+    /// What he's done this season — the deployment record (accumulated from match
+    /// box scores) that biases which attributes grow when the season is advanced
+    /// (design doc §6). Consumed and reset by [`Career::advance_season`]. Zero for
+    /// a player who hasn't featured.
+    ///
+    /// [`Career::advance_season`]: crate::Career::advance_season
+    pub season_usage: Usage,
 }
 
 impl Player {
@@ -131,9 +139,12 @@ impl Player {
             potential,
             development_risk,
             age: 18,
+            season_usage: Usage::default(),
         };
+        // No match history when synthesizing a career — uniform growth toward the
+        // ceiling, so a generated veteran is a coherent aged-up youngster.
         while player.age < target_age {
-            model.advance(&mut player, rng);
+            model.advance(&mut player, &Usage::uniform(), rng);
         }
         player
     }
