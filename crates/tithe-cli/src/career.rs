@@ -1,29 +1,49 @@
-//! `career`: the management layer's first consumer — generate a demo career,
-//! play one match through the sim, and persist the save.
+//! `career`: the management layer's first consumer — stand up a league, play an
+//! exhibition match through the sim, and persist the save.
 //!
 //! This is the headless proof of the management seam (CLAUDE.md → the GM-coach
-//! loop): `tithe-mgmt` builds the matchup and ingests the result; this binary
-//! does the file I/O the pure crate avoids. The save format (JSON here) is a
-//! consumer choice, not baked into the management layer.
+//! loop): `tithe-mgmt` builds the league and the matchup and ingests the result;
+//! this binary does the file I/O the pure crate avoids. The save format (JSON
+//! here) is a consumer choice, not baked into the management layer.
 
-use tithe_mgmt::Career;
+use tithe_mgmt::{Career, Club};
+
+/// Club names drawn on in order when building a league larger than the default.
+const LEAGUE_NAMES: &[&str] = &[
+    "Embers", "Wardens", "Cinders", "Wraiths", "Pyres", "Vigils", "Hollows", "Beacons",
+];
 
 pub fn run(args: &[String]) {
     let seed = crate::flag_or(args, "--seed", 1u64);
+    let clubs = crate::flag_or(args, "--clubs", 2usize).max(2);
+    let free_agents = crate::flag_or(args, "--free-agents", 0usize);
     let out = crate::flag(args, "--out").unwrap_or_else(|| "career.json".to_string());
 
-    let mut career = Career::demo(seed);
-    println!("== Career (seed {seed}) ==");
+    // Build the league: N clubs drawn from the central player pool, plus any
+    // unaffiliated free agents.
+    let mut career = Career::new(seed);
+    for i in 0..clubs {
+        let name = LEAGUE_NAMES.get(i).copied().unwrap_or("Club");
+        career.add_generated_club(name);
+    }
+    career.add_free_agents(free_agents);
+
+    println!(
+        "== Career (seed {seed}) — {} clubs, {} players ({} free agents) ==",
+        career.clubs.len(),
+        career.players.len(),
+        career.free_agents().len(),
+    );
     for club in &career.clubs {
         println!(
             "  {} — {} players (e.g. {})",
             club.name,
-            club.players.len(),
-            standouts(club),
+            club.roster.len(),
+            standouts(&career, club),
         );
     }
 
-    // Play the one fixture: club 0 (home) vs club 1 (away).
+    // Exhibition: club 0 (home) vs club 1 (away).
     let result = career.play(0, 1);
     let (home, away) = (&career.clubs[0], &career.clubs[1]);
     let score = result.record.score;
@@ -37,15 +57,16 @@ pub fn run(args: &[String]) {
         home.name, score[0], score[1], away.name, winner
     );
 
-    // Ingest the box score: the agent ids line up with roster slot order — home
-    // is agents 0..7, away 7..14 (the projection's team-0-first ordering).
+    // Ingest the box score: agent ids run in roster slot order — home is agents
+    // 0..7, away 7..14 (the projection's team-0-first ordering). Map back to the
+    // pooled player via the club's roster.
     if let Some((agent, line)) = top_scorer(&result.box_score) {
         let (club, slot) = if agent < 7 {
             (home, agent)
         } else {
             (away, agent - 7)
         };
-        let name = &club.players[slot].name;
+        let name = &career.player(club.roster[slot]).name;
         println!(
             "  top scorer: {} ({}) — {} on {} offerings",
             name, club.name, line.goals, line.offerings
@@ -76,12 +97,16 @@ pub fn run(args: &[String]) {
     );
 }
 
-/// A club's two highest-rated players' standout attributes, for a legible line.
-fn standouts(club: &tithe_mgmt::Club) -> String {
-    club.players
+/// A club's first two players' standout attributes, for a legible line. Resolves
+/// the roster ids against the career pool.
+fn standouts(career: &Career, club: &Club) -> String {
+    club.roster
         .iter()
         .take(2)
-        .map(|p| format!("{} a{}/p{}", p.name, p.ratings.accuracy, p.ratings.passing))
+        .map(|&id| {
+            let p = career.player(id);
+            format!("{} a{}/p{}", p.name, p.ratings.accuracy, p.ratings.passing)
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }
