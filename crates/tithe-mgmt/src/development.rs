@@ -14,7 +14,56 @@
 //! takes its randomness from a threaded [`Rng`], so a career is reproducible.
 
 use crate::player::{Player, Ratings};
-use tithe_sim::{Attribute, Rng};
+use serde::{Deserialize, Serialize};
+use tithe_sim::{Attribute, PlayerLine, Rng};
+
+/// How much each attribute was *exercised* over a season — the deployment record
+/// that biases development (design doc §6: "players improve at what they do, up to
+/// their cap"). Accumulated from match box scores via [`add_line`](Usage::add_line)
+/// and consumed when the season is advanced. Counts are in [`Attribute`] order.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    counts: [u32; 9],
+}
+
+impl Usage {
+    /// Equal exercise of every attribute — the "no deployment signal" baseline
+    /// that makes [`advance`](DevelopmentModel::advance) grow uniformly toward the
+    /// ceiling. Used when aging a generated player up, where there is no match
+    /// history to bias by.
+    pub fn uniform() -> Self {
+        Usage { counts: [1; 9] }
+    }
+
+    /// Fold one match's box-score line into the running totals. The mapping ties
+    /// each attribute to the actions the sim uses it for — a first cut, tunable:
+    /// shooting reps exercise accuracy and range, possessions handling, passes
+    /// passing, strips stripping, picked passes contesting, recoveries
+    /// positioning, athletic actions pace, and general involvement awareness.
+    pub fn add_line(&mut self, line: &PlayerLine) {
+        let possessions = line.offerings + line.passes;
+        let athletic = line.recoveries + line.strips_attempted;
+        let involvement =
+            possessions + line.strips_attempted + line.interceptions + line.recoveries;
+        self.counts[Attribute::Accuracy as usize] += line.offerings;
+        self.counts[Attribute::Range as usize] += line.offerings;
+        self.counts[Attribute::Handling as usize] += possessions;
+        self.counts[Attribute::Passing as usize] += line.passes;
+        self.counts[Attribute::Stripping as usize] += line.strips_attempted;
+        self.counts[Attribute::Contesting as usize] += line.interceptions;
+        self.counts[Attribute::Positioning as usize] += line.recoveries;
+        self.counts[Attribute::Pace as usize] += athletic;
+        self.counts[Attribute::Awareness as usize] += involvement;
+    }
+
+    fn get(&self, a: Attribute) -> u32 {
+        self.counts[a as usize]
+    }
+
+    fn max(&self) -> u32 {
+        self.counts.iter().copied().max().unwrap_or(0)
+    }
+}
 
 /// The tunable dials of the development curve. Defaults are an initial tuning
 /// guess (design doc: get the mechanic working, then tune), not commitments.
@@ -38,6 +87,10 @@ pub struct DevelopmentModel {
     /// percent at max risk. At risk 100 a year's delta varies by up to
     /// `±risk_swing%`; at risk 0 progression is exactly the projection.
     pub risk_swing: u32,
+    /// Growth an *unused* attribute still gets, as a percent of the full
+    /// age-curve growth (light practice). The most-used attribute grows at 100%;
+    /// the rest scale between this floor and 100% by their share of usage.
+    pub usage_floor: u32,
 }
 
 impl Default for DevelopmentModel {
@@ -48,6 +101,7 @@ impl Default for DevelopmentModel {
             decline_rate: 2,
             youth_fraction: 65,
             risk_swing: 60,
+            usage_floor: 30,
         }
     }
 }
@@ -82,18 +136,39 @@ impl DevelopmentModel {
     }
 
     /// Advance a player one development year: grow toward his ceiling if young,
-    /// erode shape-first if past peak, then add a year of age. Randomness (the
-    /// risk swing) is drawn from `rng`, so the result is deterministic given it.
-    pub fn advance(&self, player: &mut Player, rng: &mut Rng) {
+    /// erode shape-first if past peak, then add a year of age. `usage` biases
+    /// *growth* toward the attributes he actually exercised (pass [`Usage::uniform`]
+    /// for no signal); decline is physical and isn't trained away, so it ignores
+    /// usage. Randomness (the risk swing) is drawn from `rng`, so the result is
+    /// deterministic given it.
+    pub fn advance(&self, player: &mut Player, usage: &Usage, rng: &mut Rng) {
+        let max_usage = usage.max();
         let next = Attribute::ALL.map(|a| {
             let current = player.ratings.get(a) as i32;
             let ceiling = player.potential.get(a) as i32;
-            let projected = self.projected_delta(a, current, ceiling, player.age);
+            let base = self.projected_delta(a, current, ceiling, player.age);
+            let projected = if base > 0 {
+                base * self.usage_multiplier(usage, max_usage, a) as i32 / 100
+            } else {
+                base // decline: usage doesn't apply
+            };
             let delta = apply_risk(projected, player.development_risk, self.risk_swing, rng);
             (current + delta).clamp(0, ceiling.max(current)) as u8
         });
         player.ratings = Ratings::from_canonical(next);
         player.age = player.age.saturating_add(1);
+    }
+
+    /// Growth multiplier (percent) for an attribute from its share of the season's
+    /// usage: the most-used attribute grows at 100%, unused ones at `usage_floor`,
+    /// the rest scaled between. With uniform usage every attribute is at the max,
+    /// so all grow fully — the no-signal baseline.
+    fn usage_multiplier(&self, usage: &Usage, max_usage: u32, attr: Attribute) -> u32 {
+        // No usage signal (max 0 → checked_div None) leaves only the floor.
+        let scaled = ((100 - self.usage_floor) * usage.get(attr))
+            .checked_div(max_usage)
+            .unwrap_or(0);
+        self.usage_floor + scaled
     }
 
     /// The projected (pre-risk) one-year change for an attribute: close a fraction
@@ -148,10 +223,11 @@ mod tests {
             ratings: model.youth_ratings(&potential), // ~52
             potential: potential.clone(),
             development_risk: 0, // no noise: track the projection exactly
+            season_usage: Usage::default(),
         };
         let start = p.ratings.overall();
         for _ in 0..6 {
-            model.advance(&mut p, &mut Rng::new(1));
+            model.advance(&mut p, &Usage::uniform(), &mut Rng::new(1));
         }
         assert!(p.ratings.overall() > start, "should have grown");
         // Never exceeds the ceiling.
@@ -173,9 +249,10 @@ mod tests {
             ratings: level.clone(),
             potential: level,
             development_risk: 0,
+            season_usage: Usage::default(),
         };
         for _ in 0..5 {
-            model.advance(&mut p, &mut Rng::new(1));
+            model.advance(&mut p, &Usage::uniform(), &mut Rng::new(1));
         }
         let pace_lost = 80 - p.ratings.pace as i32;
         let awareness_lost = 80 - p.ratings.awareness as i32;
@@ -198,8 +275,9 @@ mod tests {
             ratings: level.clone(),
             potential: Ratings::from_canonical([90; 9]), // headroom, but no growth at peak
             development_risk: 100,
+            season_usage: Usage::default(),
         };
-        model.advance(&mut p, &mut Rng::new(42));
+        model.advance(&mut p, &Usage::uniform(), &mut Rng::new(42));
         assert_eq!(p.ratings, level, "no change at exactly the peak age");
     }
 
@@ -216,11 +294,48 @@ mod tests {
             ratings: model.youth_ratings(&potential),
             potential: potential.clone(),
             development_risk: 0,
+            season_usage: Usage::default(),
         };
         let mut a = make();
         let mut b = make();
-        model.advance(&mut a, &mut Rng::new(1));
-        model.advance(&mut b, &mut Rng::new(999)); // different stream, same result
+        model.advance(&mut a, &Usage::uniform(), &mut Rng::new(1));
+        model.advance(&mut b, &Usage::uniform(), &mut Rng::new(999)); // different stream, same result
         assert_eq!(a.ratings, b.ratings);
+    }
+
+    /// Usage steers growth: a young player who only takes offerings grows his
+    /// shooting (accuracy) toward its ceiling, while an attribute he never uses
+    /// (passing) only creeps up at the practice floor.
+    #[test]
+    fn usage_biases_growth_toward_what_is_used() {
+        let model = DevelopmentModel::default();
+        let potential = Ratings::from_canonical([90; 9]);
+        let make = || Player {
+            id: PlayerId(0),
+            name: "Shooter".into(),
+            age: 19,
+            ratings: model.youth_ratings(&potential),
+            potential: potential.clone(),
+            development_risk: 0, // isolate the usage effect from noise
+            season_usage: Usage::default(),
+        };
+
+        // A season of nothing but offerings (exercises shooting, not passing).
+        let mut shooting = Usage::default();
+        shooting.add_line(&PlayerLine {
+            offerings: 20,
+            ..PlayerLine::default()
+        });
+
+        let mut shooter = make();
+        let mut idle = make();
+        for _ in 0..3 {
+            model.advance(&mut shooter, &shooting, &mut Rng::new(1));
+            model.advance(&mut idle, &Usage::default(), &mut Rng::new(1));
+        }
+        // The used attribute outgrew the unused one, and outgrew the idle player's
+        // floor-only growth of the same attribute.
+        assert!(shooter.ratings.accuracy > shooter.ratings.passing);
+        assert!(shooter.ratings.accuracy > idle.ratings.accuracy);
     }
 }
