@@ -32,7 +32,8 @@ const HEADER: &str = "\
 #                     using it on the +x side is mirrored automatically.
 # [[teams]]           exactly two; players are listed in slot order and fill
 #                     the formation's slots 1:1. Attributes are 0..=100.
-#                     role = finisher | playmaker | presser | anchor | rover
-#                     (a label today; it shows in the play-by-play log).
+#                     attack_role = runner | outlet | pivot | playmaker | finisher
+#                     defend_role = sweeper | marker | destroyer | hawk | cheat
+#                     (casting tendencies; they shape play and show in the log).
 
 ";

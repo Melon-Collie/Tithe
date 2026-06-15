@@ -1,0 +1,222 @@
+# Tithe match setup - the two coach inputs (formations + roles) plus players.
+#
+# [formations.NAME]  a positioning template: one [x, y] anchor per slot,
+#                     authored in the team-0 frame (own goal at -x). A team
+#                     using it on the +x side is mirrored automatically.
+# [[teams]]           exactly two; players are listed in slot order and fill
+#                     the formation's slots 1:1. Attributes are 0..=100.
+#                     attack_role = runner | outlet | pivot | playmaker | finisher
+#                     defend_role = sweeper | marker | destroyer | hawk | cheat
+#                     (casting tendencies; they shape play and show in the log).
+
+[formations.high-push]
+slots = [[3, 0], [0, -2], [-2, 2], [-1, 0], [3, -3], [-5, 0], [0, 3]]
+
+[formations.low-block]
+slots = [[5, 0], [4, -2], [0, 2], [3, 0], [6, -3], [-1, 0], [3, 3]]
+
+[[teams]]
+name = "Embers"
+attack_formation = "high-push"
+defend_formation = "low-block"
+
+[[teams.players]]
+name = "Vale"
+attack_role = "outlet"
+defend_role = "sweeper"
+accuracy = 20
+range = 20
+handling = 35
+stripping = 70
+contesting = 65
+passing = 45
+positioning = 75
+pace = 40
+awareness = 60
+
+[[teams.players]]
+name = "Crane"
+attack_role = "runner"
+defend_role = "marker"
+accuracy = 45
+range = 45
+handling = 50
+stripping = 50
+contesting = 50
+passing = 55
+positioning = 50
+pace = 70
+awareness = 50
+
+[[teams.players]]
+name = "Ash"
+attack_role = "pivot"
+defend_role = "hawk"
+accuracy = 40
+range = 35
+handling = 65
+stripping = 35
+contesting = 55
+passing = 80
+positioning = 60
+pace = 50
+awareness = 75
+
+[[teams.players]]
+name = "Rook"
+attack_role = "playmaker"
+defend_role = "marker"
+accuracy = 50
+range = 45
+handling = 50
+stripping = 55
+contesting = 50
+passing = 50
+positioning = 50
+pace = 55
+awareness = 50
+
+[[teams.players]]
+name = "Pyre"
+attack_role = "runner"
+defend_role = "destroyer"
+accuracy = 50
+range = 35
+handling = 40
+stripping = 65
+contesting = 60
+passing = 35
+positioning = 45
+pace = 75
+awareness = 45
+
+[[teams.players]]
+name = "Sear"
+attack_role = "finisher"
+defend_role = "cheat"
+accuracy = 85
+range = 30
+handling = 55
+stripping = 30
+contesting = 40
+passing = 50
+positioning = 55
+pace = 60
+awareness = 70
+
+[[teams.players]]
+name = "Knell"
+attack_role = "pivot"
+defend_role = "destroyer"
+accuracy = 45
+range = 40
+handling = 40
+stripping = 60
+contesting = 65
+passing = 40
+positioning = 40
+pace = 65
+awareness = 40
+
+[[teams]]
+name = "Wardens"
+attack_formation = "high-push"
+defend_formation = "low-block"
+
+[[teams.players]]
+name = "Holt"
+attack_role = "outlet"
+defend_role = "sweeper"
+accuracy = 25
+range = 25
+handling = 35
+stripping = 75
+contesting = 60
+passing = 40
+positioning = 80
+pace = 40
+awareness = 65
+
+[[teams.players]]
+name = "Bram"
+attack_role = "runner"
+defend_role = "marker"
+accuracy = 50
+range = 45
+handling = 50
+stripping = 50
+contesting = 50
+passing = 55
+positioning = 45
+pace = 70
+awareness = 50
+
+[[teams.players]]
+name = "Fen"
+attack_role = "pivot"
+defend_role = "hawk"
+accuracy = 45
+range = 40
+handling = 70
+stripping = 40
+contesting = 50
+passing = 75
+positioning = 60
+pace = 50
+awareness = 80
+
+[[teams.players]]
+name = "Cole"
+attack_role = "playmaker"
+defend_role = "marker"
+accuracy = 50
+range = 50
+handling = 50
+stripping = 50
+contesting = 55
+passing = 50
+positioning = 50
+pace = 50
+awareness = 50
+
+[[teams.players]]
+name = "Dane"
+attack_role = "runner"
+defend_role = "destroyer"
+accuracy = 50
+range = 35
+handling = 40
+stripping = 60
+contesting = 65
+passing = 35
+positioning = 45
+pace = 75
+awareness = 45
+
+[[teams.players]]
+name = "Gar"
+attack_role = "finisher"
+defend_role = "cheat"
+accuracy = 55
+range = 85
+handling = 55
+stripping = 35
+contesting = 45
+passing = 55
+positioning = 35
+pace = 45
+awareness = 40
+
+[[teams.players]]
+name = "Ward"
+attack_role = "pivot"
+defend_role = "destroyer"
+accuracy = 45
+range = 40
+handling = 40
+stripping = 65
+contesting = 60
+passing = 45
+positioning = 40
+pace = 65
+awareness = 40

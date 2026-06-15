@@ -166,22 +166,21 @@ pub fn meta() -> Meta {
     // roster dropdowns and AgentMeta use.
     let mut attack = BTreeMap::new();
     for (key, role) in [
-        ("box_to_box", InPossessionRole::BoxToBox),
-        ("roamer", InPossessionRole::Roamer),
-        ("playmaker", InPossessionRole::Playmaker),
+        ("runner", InPossessionRole::Runner),
         ("outlet", InPossessionRole::Outlet),
+        ("pivot", InPossessionRole::Pivot),
+        ("playmaker", InPossessionRole::Playmaker),
         ("finisher", InPossessionRole::Finisher),
     ] {
         attack.insert(key.to_string(), fp(cfg.on_ball_bias(role).footprint));
     }
     let mut defend = BTreeMap::new();
     for (key, role) in [
-        ("destroyer", OutOfPossessionRole::Destroyer),
-        ("presser", OutOfPossessionRole::Presser),
-        ("warden", OutOfPossessionRole::Warden),
         ("sweeper", OutOfPossessionRole::Sweeper),
+        ("marker", OutOfPossessionRole::Marker),
+        ("destroyer", OutOfPossessionRole::Destroyer),
+        ("hawk", OutOfPossessionRole::Hawk),
         ("cheat", OutOfPossessionRole::Cheat),
-        ("tracker", OutOfPossessionRole::Tracker),
     ] {
         defend.insert(key.to_string(), fp(cfg.defense_bias(role).footprint));
     }
@@ -357,25 +356,48 @@ fn narrate(event: &Event, names: &[String], teams: &[u8]) -> Option<(&'static st
         Event::PassIntercepted { by } => {
             Some(("turnover", format!("↳ intercepted by {}!", who(*by))))
         }
+        Event::PassDeflected { by } => {
+            Some(("turnover", format!("↳ tipped loose by {}!", who(*by))))
+        }
         Event::StripAttempt {
             defender,
             carrier,
             chance,
             success: true,
+            clean,
         } => Some((
             "turnover",
-            format!("{} strips {} ({chance}%)", who(*defender), who(*carrier)),
+            if *clean {
+                format!(
+                    "{} strips {} clean ({chance}%)",
+                    who(*defender),
+                    who(*carrier)
+                )
+            } else {
+                format!(
+                    "{} pokes it off {} ({chance}%)",
+                    who(*defender),
+                    who(*carrier)
+                )
+            },
         )),
         Event::OfferingResolved {
             carrier,
             chance,
+            charge,
             scored,
         } => Some(if *scored {
-            ("goal", format!("⚑ {} SCORES ({chance}%)", who(*carrier)))
+            (
+                "goal",
+                format!("⚑ {} SCORES ({chance}%, {charge}% charged)", who(*carrier)),
+            )
         } else {
             (
                 "shot",
-                format!("{} offers ({chance}%) — no good", who(*carrier)),
+                format!(
+                    "{} offers ({chance}%, {charge}% charged) — no good",
+                    who(*carrier)
+                ),
             )
         }),
         Event::MatchOver { winner } => Some(("end", format!("FINAL — team {winner} wins"))),

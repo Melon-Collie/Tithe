@@ -31,24 +31,31 @@ pub enum Event {
     PossessionGained { agent: u32 },
     /// A committed strip: `defender` lunged at `carrier` with a `chance`% to win.
     /// On `success` the soul turns over; otherwise the defender whiffs and is
-    /// staggered.
+    /// staggered. A winning strip is `clean` (the defender gathers it) or not (the
+    /// soul is poked loose into a scramble) — the turnover is no longer binary.
     StripAttempt {
         defender: u32,
         carrier: u32,
         chance: u8,
         success: bool,
+        clean: bool,
     },
     /// A carrier launched a pass toward `to` with a `chance`% to complete.
     PassMade { from: u32, to: u32, chance: u8 },
-    /// An enemy picked off a pass in flight (a turnover).
+    /// An enemy cleanly picked off a pass in flight (a clean turnover).
     PassIntercepted { by: u32 },
+    /// An enemy tipped a pass loose (a deflection) — the soul drops into open play
+    /// at `by`'s position rather than being cleanly gathered.
+    PassDeflected { by: u32 },
     /// A carrier reached its goal and began an offering (the wind-up).
     OfferingStarted { carrier: u32 },
-    /// An offering resolved with a `chance`% to score. On a miss the soul is
-    /// spat back into open play (no cheap put-back; a fresh scramble).
+    /// An offering resolved with a `chance`% to score (already including the
+    /// `charge`% built up — a fully-charged shot from space converts far better).
+    /// On a miss the soul is spat back into open play (no cheap put-back).
     OfferingResolved {
         carrier: u32,
         chance: u8,
+        charge: u8,
         scored: bool,
     },
     /// A team banked a soul (a successful offering). `score` is the running

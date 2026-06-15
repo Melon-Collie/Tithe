@@ -65,11 +65,11 @@ fn templates() -> Vec<Template> {
             slots: [
                 //   label    attack    defend     atk[q,r]  def[q,r]
                 s("Goalie", Outlet, Sweeper, 3, 0, 5, 0),
-                s("Def-L", Outlet, Warden, 2, -1, 4, -1),
-                s("Def-R", Outlet, Warden, 1, 1, 3, 1),
-                s("Mid-L", Roamer, Presser, -2, -2, 1, -2),
-                s("Mid-C", Playmaker, Tracker, -1, 0, 2, 0),
-                s("Mid-R", Roamer, Presser, -3, 2, 0, 2),
+                s("Def-L", Outlet, Marker, 2, -1, 4, -1),
+                s("Def-R", Outlet, Marker, 1, 1, 3, 1),
+                s("Mid-L", Runner, Hawk, -2, -2, 1, -2),
+                s("Mid-C", Playmaker, Marker, -1, 0, 2, 0),
+                s("Mid-R", Runner, Hawk, -3, 2, 0, 2),
                 s("Fwd", Finisher, Cheat, -5, 0, -1, 0),
             ],
         },
@@ -78,11 +78,11 @@ fn templates() -> Vec<Template> {
             name: "3-2-1",
             slots: [
                 s("Goalie", Outlet, Sweeper, 3, 0, 5, 0),
-                s("Def-L", Outlet, Warden, 2, -2, 4, -2),
-                s("Def-C", BoxToBox, Destroyer, 2, 0, 4, 0),
-                s("Def-R", Outlet, Warden, 0, 2, 2, 2),
-                s("Mid-L", Roamer, Presser, -2, -1, 1, -1),
-                s("Mid-R", Playmaker, Tracker, -3, 1, 0, 1),
+                s("Def-L", Outlet, Marker, 2, -2, 4, -2),
+                s("Def-C", Runner, Destroyer, 2, 0, 4, 0),
+                s("Def-R", Outlet, Marker, 0, 2, 2, 2),
+                s("Mid-L", Pivot, Hawk, -2, -1, 1, -1),
+                s("Mid-R", Playmaker, Hawk, -3, 1, 0, 1),
                 s("Fwd", Finisher, Cheat, -5, 0, -1, 0),
             ],
         },
@@ -104,10 +104,11 @@ fn want(pairs: &[(Attribute, f64)]) -> [f64; 9] {
 fn attack_want(r: IP) -> [f64; 9] {
     use Attribute::*;
     match r {
-        IP::BoxToBox => want(&[(Handling, 2.), (Contesting, 1.), (Passing, 1.), (Pace, 2.)]),
-        IP::Roamer => want(&[(Handling, 2.), (Stripping, 1.), (Pace, 2.)]),
-        IP::Playmaker => want(&[(Passing, 3.), (Positioning, 1.), (Awareness, 2.)]),
-        IP::Outlet => want(&[(Handling, 2.), (Passing, 2.), (Positioning, 1.)]),
+        // Runner really wants Pace — he drives at the space he opens.
+        IP::Runner => want(&[(Pace, 3.), (Handling, 2.), (Contesting, 1.)]),
+        IP::Outlet => want(&[(Passing, 3.), (Handling, 1.), (Positioning, 2.)]),
+        IP::Pivot => want(&[(Passing, 3.), (Awareness, 2.), (Positioning, 1.)]),
+        IP::Playmaker => want(&[(Passing, 2.), (Handling, 2.), (Awareness, 2.)]),
         IP::Finisher => want(&[(Accuracy, 3.), (Range, 2.), (Pace, 1.)]),
     }
 }
@@ -116,12 +117,16 @@ fn attack_want(r: IP) -> [f64; 9] {
 fn defend_want(r: OP) -> [f64; 9] {
     use Attribute::*;
     match r {
-        OP::Destroyer => want(&[(Stripping, 3.), (Pace, 2.)]),
-        OP::Presser => want(&[(Stripping, 2.), (Contesting, 2.), (Pace, 2.)]),
-        OP::Warden => want(&[(Handling, 1.), (Contesting, 2.), (Positioning, 2.)]),
         OP::Sweeper => want(&[(Handling, 1.), (Stripping, 1.), (Positioning, 3.)]),
+        OP::Marker => want(&[(Positioning, 2.), (Awareness, 2.), (Contesting, 2.)]),
+        OP::Destroyer => want(&[(Stripping, 3.), (Pace, 2.)]),
+        OP::Hawk => want(&[
+            (Contesting, 2.),
+            (Awareness, 2.),
+            (Positioning, 1.),
+            (Pace, 1.),
+        ]),
         OP::Cheat => want(&[(Accuracy, 2.), (Range, 1.), (Pace, 2.)]),
-        OP::Tracker => want(&[(Contesting, 2.), (Positioning, 2.), (Awareness, 1.)]),
     }
 }
 

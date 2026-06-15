@@ -55,17 +55,22 @@ pub use hex::{Board, Hex};
 pub use rng::Rng;
 pub use setup::{MatchSetup, PlayerSetup, SetupError};
 pub use world::{Agent, Attribute, Footprint, Formation, Possession, SimConfig, Soul};
-pub use world::{InPossessionRole, OutOfPossessionRole};
+pub use world::{FlightOutcome, InPossessionRole, OffBallMode, OutOfPossessionRole, Position};
 
 /// Opaque seed for a simulation run. Same seed + same inputs → same event
 /// stream, on every platform and every replay.
 pub type Seed = u64;
 
-/// An offering in progress: which agent is winding up, and ticks left to resolve.
+/// An offering in progress: which agent is winding up, and the charge built so
+/// far (`[0, 1]`). Charge accrues *slowly* each tick the offerer is uncontested
+/// and is spent as a conversion multiplier at resolve. There's no fixed wind-up:
+/// the offer resolves either when fully charged (a wide-open bomb) or the instant
+/// a defender closes in (a forced early release at partial charge). Space *is* the
+/// charge — and the defense racing back to spoil it is the drama.
 #[derive(Debug, Clone, Copy)]
 struct OfferState {
     carrier: u32,
-    ticks_left: u32,
+    charge: Fx,
 }
 
 /// A seeded random scalar in `[-1, 1]` (0.001 steps) — the building block for
@@ -415,15 +420,32 @@ impl Simulation {
             let success_pct = pct.to_num::<u64>();
             let chance = success_pct as u8;
             if self.rng.below(100) < success_pct {
-                self.soul.possession = Possession::Held(defender_id);
-                self.soul.pos = self.agents[i].pos;
+                // A turnover happened — now clean steal vs poked loose, scaling
+                // with the stripper's Stripping. A great stripper takes it cleanly;
+                // a marginal one only knocks it free into a scramble.
+                let one = Fx::from_num(1);
+                let floor = self.config.strip_clean_floor;
+                let clean_chance = floor + (one - floor) * self.agents[i].attributes.stripping;
+                let clean =
+                    self.rng.below(100) < (clean_chance * Fx::from_num(100)).to_num::<u64>();
+                if clean {
+                    self.soul.possession = Possession::Held(defender_id);
+                    self.soul.pos = self.agents[i].pos;
+                } else {
+                    // Poked loose toward the defender's side — a free ball that
+                    // favors, but doesn't guarantee, the team that won the contest.
+                    self.poke_loose(carrier_pos, self.agents[i].pos);
+                }
                 events.push(Event::StripAttempt {
                     defender: defender_id,
                     carrier: carrier_id,
                     chance,
                     success: true,
+                    clean,
                 });
-                events.push(Event::PossessionGained { agent: defender_id });
+                if clean {
+                    events.push(Event::PossessionGained { agent: defender_id });
+                }
                 return; // one turnover per decision window
             }
 
@@ -433,6 +455,7 @@ impl Simulation {
                 carrier: carrier_id,
                 chance,
                 success: false,
+                clean: false,
             });
         }
     }
@@ -550,7 +573,32 @@ impl Simulation {
         if reached.is_empty() {
             return;
         }
-        let winner = reached[self.rng.below(reached.len() as u64) as usize];
+        // Skill-weighted draw: the seeded pick is biased by `1 + weight·Stripping`,
+        // so ball-winners gather a poked-free or tipped soul more often than
+        // whoever's merely nearest — possession follows merit, not proximity-luck.
+        // (This is the lever that keeps the extra loose balls from making blind
+        // ball-chasing the only tactic.)
+        let one = Fx::from_num(1);
+        let scale = Fx::from_num(1000);
+        let weights: Vec<u64> = reached
+            .iter()
+            .map(|&id| {
+                let s = self.agents[id as usize].attributes.stripping;
+                ((one + self.config.loose_ball_skill_weight * s) * scale)
+                    .to_num::<u64>()
+                    .max(1)
+            })
+            .collect();
+        let total: u64 = weights.iter().sum();
+        let mut pick = self.rng.below(total);
+        let mut winner = reached[0];
+        for (k, &w) in weights.iter().enumerate() {
+            if pick < w {
+                winner = reached[k];
+                break;
+            }
+            pick -= w;
+        }
         self.soul.possession = Possession::Held(winner);
         events.push(Event::SoulClaimed { agent: winner });
     }
@@ -559,6 +607,28 @@ impl Simulation {
     fn carry_soul(&mut self) {
         if let Possession::Held(id) = self.soul.possession {
             self.soul.pos = self.agents[id as usize].pos;
+        }
+    }
+
+    /// Drop the soul loose between the carrier and the defender who knocked it
+    /// free, biased toward the defender's side — a free ball that favors (but
+    /// doesn't hand to) the team that won the contest. The skill-weighted scramble
+    /// in [`claim_loose_soul`] decides who actually gathers it.
+    fn poke_loose(&mut self, carrier_pos: Vec2, defender_pos: Vec2) {
+        // 70% of the way from the carrier toward the poking defender.
+        let toward = (carrier_pos - defender_pos).scale(Fx::from_num(3) / Fx::from_num(10));
+        self.soul = Soul::loose_at(defender_pos + toward);
+    }
+
+    /// How much charge a carrier could build from his current space: full when
+    /// uncontested, falling to zero at the harry ceiling. Used so the shoot
+    /// decision anticipates the payoff of offering from space.
+    fn charge_potential(&self, contest: Fx) -> Fx {
+        let ceil = self.config.charge_contest_ceiling;
+        if contest >= ceil {
+            Fx::from_num(0)
+        } else {
+            (ceil - contest) / ceil
         }
     }
 
@@ -644,11 +714,18 @@ impl Simulation {
             bias.carry_mult * carry_tether,
         );
 
-        // Shooting from here (against the pressure he feels up close — real).
+        // Shooting from here (against the pressure he feels up close — real). The
+        // carrier *anticipates the charge* he could build from his current space:
+        // open now ⇒ expects a near-full charge ⇒ a much higher effective chance,
+        // so a man in space shoots more, and from further out. Creating space is
+        // the premier offensive task. (The realized charge accrues over the
+        // wind-up — if a defender closes in, he converts worse than he hoped.)
         let distance = carrier_pos.distance_to(my_goal);
         let shoot_contest = self.offering_contest(team, carrier_pos);
+        let base_prob = self.shot_probability(distance, attrs.accuracy, attrs.range, shoot_contest);
+        let charge_potential = self.charge_potential(shoot_contest);
         let shoot_prob =
-            self.shot_probability(distance, attrs.accuracy, attrs.range, shoot_contest);
+            (base_prob * (one + charge_potential * self.config.charge_conversion_gain)).min(one);
         let can_shoot = shoot_prob >= bias.min_shoot_prob;
         let shoot_ev = shoot_prob * self.config.shot_value * bias.shoot_mult
             - (one - shoot_prob)
@@ -692,7 +769,7 @@ impl Simulation {
         if can_shoot && shoot_ev > zero && shoot_ev >= carry_ev && shoot_ev >= best_pass_ev {
             self.offering = Some(OfferState {
                 carrier: carrier_id,
-                ticks_left: self.config.offering_windup,
+                charge: zero, // builds slowly while uncontested; spoiled if closed down
             });
             events.push(Event::OfferingStarted {
                 carrier: carrier_id,
@@ -707,12 +784,15 @@ impl Simulation {
             let completion = (real_lane * (half + attrs.passing)).clamp(zero, one);
             let pct = (completion * Fx::from_num(100)).to_num::<u64>();
             let completed = self.rng.below(100) < pct;
-            // A failed roll is picked off by the nearest defender within the wider
+            // A failed roll is contested by the nearest defender within the wider
             // interception radius (he reads the bad ball); with none that close the
-            // lane was genuinely open, so it still reaches the receiver. This is
-            // what punishes poor passing and gives cover-shadow a real channel.
-            let interceptor = if completed {
-                None
+            // lane was genuinely open, so it still reaches the receiver. When a
+            // defender *does* read it, the turnover is no longer binary: Positioning
+            // is the read (does he capitalize at all), then Contesting decides a
+            // clean pick vs a tip into open play — better defenders both win more
+            // turnovers and convert more of them cleanly.
+            let (to, outcome) = if completed {
+                (receiver, world::FlightOutcome::Complete)
             } else {
                 let candidate = self
                     .worst_lane_defender(
@@ -723,22 +803,28 @@ impl Simulation {
                         one / Fx::from_num(4), // skip only the quarter nearest the passer
                     )
                     .1;
-                // Positioning *is* the read: a well-positioned defender jumps the
-                // lane; a ball-watcher is near it but misreads and it completes.
-                // Floored so picks are common enough that Passing (which fails the
-                // roll) still bites — `floor + (1-floor)·Positioning`. This makes
-                // Positioning a first-order possession lever instead of rewarding
-                // whoever happens to swarm the ball.
-                let floor = self.config.intercept_read_floor;
-                candidate.filter(|&id| {
-                    let read =
-                        floor + (one - floor) * self.agents[id as usize].attributes.positioning;
-                    self.rng.below(100) < (read * Fx::from_num(100)).to_num::<u64>()
-                })
+                match candidate {
+                    Some(id) => {
+                        let attrs_d = self.agents[id as usize].attributes;
+                        let read = self.config.intercept_read_floor
+                            + (one - self.config.intercept_read_floor) * attrs_d.positioning;
+                        if self.rng.below(100) >= (read * Fx::from_num(100)).to_num::<u64>() {
+                            // Read failed — he misjudged it, the ball gets through.
+                            (receiver, world::FlightOutcome::Complete)
+                        } else {
+                            let clean = self.config.intercept_clean_floor
+                                + (one - self.config.intercept_clean_floor) * attrs_d.contesting;
+                            if self.rng.below(100) < (clean * Fx::from_num(100)).to_num::<u64>() {
+                                (id, world::FlightOutcome::Intercepted)
+                            } else {
+                                (id, world::FlightOutcome::Deflected)
+                            }
+                        }
+                    }
+                    None => (receiver, world::FlightOutcome::Complete),
+                }
             };
-            let intercepted = interceptor.is_some();
-            let to = interceptor.unwrap_or(receiver);
-            self.soul.possession = Possession::InFlight { to, intercepted };
+            self.soul.possession = Possession::InFlight { to, outcome };
             events.push(Event::PassMade {
                 from: carrier_id,
                 to: receiver,
@@ -870,20 +956,33 @@ impl Simulation {
     }
 
     /// Advance a pass in flight to its predetermined catcher (receiver on a
-    /// completion, interceptor on a pick — decided at release). The soul homes
-    /// and is caught within `pickup_radius`; no mid-flight convergence.
+    /// completion, defender on a pick or deflection — decided at release). The soul
+    /// homes and resolves within `pickup_radius`; no mid-flight convergence. A
+    /// clean pick or completion is gathered; a deflection drops loose at the
+    /// deflector's spot for a scramble.
     fn advance_soul_flight(&mut self, events: &mut Vec<Event>) {
-        let Possession::InFlight { to, intercepted } = self.soul.possession else {
+        let Possession::InFlight { to, outcome } = self.soul.possession else {
             return;
         };
         let target = self.agents[to as usize].pos;
         self.soul.pos = world::step_toward(self.soul.pos, target, self.config.pass_speed);
         if self.soul.pos.distance_to(target) <= self.config.pickup_radius {
-            self.soul.possession = Possession::Held(to);
-            if intercepted {
-                events.push(Event::PassIntercepted { by: to });
+            match outcome {
+                world::FlightOutcome::Complete => {
+                    self.soul.possession = Possession::Held(to);
+                    events.push(Event::PossessionGained { agent: to });
+                }
+                world::FlightOutcome::Intercepted => {
+                    self.soul.possession = Possession::Held(to);
+                    events.push(Event::PassIntercepted { by: to });
+                    events.push(Event::PossessionGained { agent: to });
+                }
+                world::FlightOutcome::Deflected => {
+                    // Tipped loose — drops into open play at the deflector's spot.
+                    self.soul = Soul::loose_at(self.agents[to as usize].pos);
+                    events.push(Event::PassDeflected { by: to });
+                }
             }
-            events.push(Event::PossessionGained { agent: to });
         }
     }
 
@@ -894,16 +993,25 @@ impl Simulation {
     ///
     /// [`resolve_on_ball`]: Simulation::resolve_on_ball
     fn update_offering(&mut self, events: &mut Vec<Event>) -> bool {
-        if let Some(state) = self.offering {
-            if state.ticks_left > 1 {
-                self.offering = Some(OfferState {
-                    ticks_left: state.ticks_left - 1,
-                    ..state
-                });
-                return false;
-            }
-            return self.resolve_offering(state.carrier, events);
+        let Some(mut state) = self.offering else {
+            return false;
+        };
+        let team = self.agents[state.carrier as usize].team;
+        let pos = self.agents[state.carrier as usize].pos;
+        // A defender closing into his face spoils the charge — forced release now,
+        // at whatever charge he has built (this is what the defense races to do).
+        if self.offering_contest(team, pos) >= self.config.charge_contest_ceiling {
+            return self.resolve_offering(state.carrier, state.charge, events);
         }
+        // Uncontested: keep charging, slowly. A full charge (a wide-open bomb) is
+        // earned only by holding the space the whole wind-up; resolve when it lands.
+        let one = Fx::from_num(1);
+        let step = one / Fx::from_num(self.config.charge_full_ticks);
+        state.charge = (state.charge + step).min(one);
+        if state.charge >= one {
+            return self.resolve_offering(state.carrier, state.charge, events);
+        }
+        self.offering = Some(state);
         false
     }
 
@@ -951,20 +1059,27 @@ impl Simulation {
     /// miss spits the soul back into play.
     ///
     /// [`shot_probability`]: Simulation::shot_probability
-    fn resolve_offering(&mut self, carrier_id: u32, events: &mut Vec<Event>) -> bool {
+    fn resolve_offering(&mut self, carrier_id: u32, charge: Fx, events: &mut Vec<Event>) -> bool {
         self.offering = None;
         let team = self.agents[carrier_id as usize].team;
         let carrier_pos = self.agents[carrier_id as usize].pos;
         let attrs = self.agents[carrier_id as usize].attributes;
 
+        let one = Fx::from_num(1);
         let distance = carrier_pos.distance_to(self.goals[team as usize]);
         let contest = self.offering_contest(team, carrier_pos);
-        let prob = self.shot_probability(distance, attrs.accuracy, attrs.range, contest);
+        let base = self.shot_probability(distance, attrs.accuracy, attrs.range, contest);
+        // Charge built over the wind-up boosts conversion: a fully-charged shot
+        // from space is far likelier than a snap one (the realized charge, not the
+        // potential — if a defender closed in, the bonus shrank tick by tick).
+        let prob = (base * (one + charge * self.config.charge_conversion_gain)).min(one);
         let success_pct = (prob * Fx::from_num(100)).to_num::<u64>();
+        let charge_pct = (charge * Fx::from_num(100)).to_num::<u64>();
         let scored = self.rng.below(100) < success_pct;
         events.push(Event::OfferingResolved {
             carrier: carrier_id,
             chance: success_pct as u8,
+            charge: charge_pct as u8,
             scored,
         });
 
@@ -1098,27 +1213,57 @@ mod tests {
         );
     }
 
-    /// The defensive-role table has the intended shape: an aggressive Presser
-    /// (forward-leaning, no lunge gate) vs. a patient Sweeper (contains), and a
-    /// Cheat that never challenges. Footprint aspects match the grammar.
+    /// The defensive-role table encodes the 2×2 grammar: aggression (no lunge
+    /// gate, sits tight) vs containment (gated, stands off goal-side), crossed with
+    /// passing-lane vs driving-lane off-ball coverage. Plus a Cheat that never
+    /// challenges, and footprint aspects that match the shape grammar.
     #[test]
     fn defense_bias_table_shapes_roles() {
+        use OffBallMode::{DrivingLanes, PassingLanes};
         let cfg = SimConfig::default();
         let one = Fx::from_num(1);
-        let presser = cfg.defense_bias(OutOfPossessionRole::Presser);
+        let zero = Fx::from_num(0);
         let sweeper = cfg.defense_bias(OutOfPossessionRole::Sweeper);
+        let marker = cfg.defense_bias(OutOfPossessionRole::Marker);
+        let destroyer = cfg.defense_bias(OutOfPossessionRole::Destroyer);
+        let hawk = cfg.defense_bias(OutOfPossessionRole::Hawk);
         let cheat = cfg.defense_bias(OutOfPossessionRole::Cheat);
-        let tracker = cfg.defense_bias(OutOfPossessionRole::Tracker);
-        // Presser hounds from distance and leans forward; Sweeper holds and contains.
-        assert!(presser.contest_range_mult > one);
-        assert!(presser.footprint.lean > Fx::from_num(0));
-        assert_eq!(presser.lunge_min_prob, Fx::from_num(0));
-        assert!(sweeper.lunge_min_prob > Fx::from_num(0));
+
+        // On-ball axis: aggressive roles don't gate their lunge and sit tight on
+        // the ball; containing roles gate it and stand off goal-side.
+        assert_eq!(destroyer.lunge_min_prob, zero);
+        assert_eq!(destroyer.containment_dist, zero);
+        assert!(hawk.contest_range_mult > one); // hounds from distance to jump lanes
+        assert!(sweeper.lunge_min_prob > zero);
+        assert!(sweeper.containment_dist > zero);
+        assert!(marker.lunge_min_prob > zero);
+
+        // Off-ball axis: the 2×2 covers both modes on each side.
+        assert_eq!(sweeper.off_ball, DrivingLanes);
+        assert_eq!(destroyer.off_ball, DrivingLanes);
+        assert_eq!(marker.off_ball, PassingLanes);
+        assert_eq!(hawk.off_ball, PassingLanes);
+
         // Cheat never breaks shape to challenge.
-        assert_eq!(cheat.contest_range_mult, Fx::from_num(0));
+        assert_eq!(cheat.contest_range_mult, zero);
+
         // Aspect grammar (x = along the field, y = across): Sweeper is a wide band
-        // across the last line; Tracker is a long lane along the field.
+        // across the last line; Hawk is a long lane along the field.
         assert!(sweeper.footprint.half_y > sweeper.footprint.half_x);
-        assert!(tracker.footprint.half_x > tracker.footprint.half_y);
+        assert!(hawk.footprint.half_x > hawk.footprint.half_y);
+    }
+
+    /// Derived positions read off the role pair: a deep distributor who sweeps is
+    /// all-Defense; a finisher who cheats is all-Forward; a runner who sweeps is a
+    /// wingback (Middle in attack, Defense in defense).
+    #[test]
+    fn positions_derive_from_role_pair() {
+        assert_eq!(InPossessionRole::Outlet.position(), Position::Defense);
+        assert_eq!(OutOfPossessionRole::Sweeper.position(), Position::Defense);
+        assert_eq!(InPossessionRole::Finisher.position(), Position::Forward);
+        assert_eq!(OutOfPossessionRole::Cheat.position(), Position::Forward);
+        // Wingback: forward-band runner, back-band sweeper.
+        assert_eq!(InPossessionRole::Runner.position(), Position::Middle);
+        assert_eq!(OutOfPossessionRole::Sweeper.position(), Position::Defense);
     }
 }

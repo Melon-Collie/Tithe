@@ -17,7 +17,7 @@
 use crate::fx::{Fx, Vec2};
 use crate::hex::Board;
 use crate::value;
-use crate::world::{Agent, OutOfPossessionRole, SimConfig, Soul};
+use crate::world::{Agent, OffBallMode, OutOfPossessionRole, SimConfig, Soul};
 
 /// A snapshot of whoever currently carries the soul — passed to the scorer so
 /// it never has to borrow the whole agent list mid-decision.
@@ -98,12 +98,15 @@ pub fn target_for(
         // The carrier's straight-line default; the sim overrides it with a
         // pressure-aware carry route in resolve_on_ball.
         Intent::CarryToGoal => goals[agent.team as usize],
-        // Contain: sit goal-side of the carrier (between it and its goal), so
-        // the straight route into the goal is the one the carrier's EV avoids.
+        // On-ball axis (containment vs aggression): sit `containment_dist`
+        // goal-side of the carrier (between it and its goal). A *containing* role
+        // stands off goal-side to wall off the straight route; an *aggressive*
+        // role's distance is ~0, so it sits tight on the ball to attack it.
         Intent::ContestCarrier => match carrier {
             Some(c) => {
                 let to_goal = goals[c.team as usize] - c.pos;
-                c.pos + to_goal.normalized().scale(config.pressure_containment_dist)
+                let standoff = config.defense_bias(agent.defend_role).containment_dist;
+                c.pos + to_goal.normalized().scale(standoff)
             }
             None => agent.anchor,
         },
@@ -190,25 +193,52 @@ pub fn off_ball_target(
             // outlet toward my own goal, ignoring the enemy carrier.
             value::value_at(candidate, my_goal, enemies, config)
         } else {
-            // Cover-shadow the carrier's most dangerous lane: maximize the threat
-            // removed = the best (shadow × receiver xT) over enemy receivers.
-            let mut removed = Fx::from_num(0);
-            for &receiver in enemies {
-                if receiver == carrier.pos {
-                    continue; // the carrier itself, not a receiver
+            // Off-ball axis: the same cover-shadow primitive, pointed at a
+            // different target by the role's mode (the AI stays dumb-but-sound).
+            match config.defense_bias(agent.defend_role).off_ball {
+                OffBallMode::PassingLanes => {
+                    // Deny the pass: cover-shadow the carrier's most dangerous lane
+                    // to a receiver = best (shadow × receiver xT) over receivers.
+                    let mut removed = zero;
+                    for &receiver in enemies {
+                        if receiver == carrier.pos {
+                            continue; // the carrier itself, not a receiver
+                        }
+                        let shadow = value::segment_shadow(
+                            candidate,
+                            carrier.pos,
+                            receiver,
+                            config.lane_radius,
+                        );
+                        if shadow <= zero {
+                            continue;
+                        }
+                        let threat = value::value_at(receiver, enemy_goal, allies, config);
+                        let removed_here = shadow * threat;
+                        if removed_here > removed {
+                            removed = removed_here;
+                        }
+                    }
+                    removed
                 }
-                let shadow =
-                    value::segment_shadow(candidate, carrier.pos, receiver, config.lane_radius);
-                if shadow <= Fx::from_num(0) {
-                    continue;
-                }
-                let threat = value::value_at(receiver, enemy_goal, allies, config);
-                let removed_here = shadow * threat;
-                if removed_here > removed {
-                    removed = removed_here;
+                OffBallMode::DrivingLanes => {
+                    // Deny the drive (help-side / deny-penetration): sag into the
+                    // lane from the carrier toward the goal he attacks, weighted by
+                    // how dangerous (goal-close) the covered spot is — protect the
+                    // rim, not the passing options.
+                    let shadow = value::segment_shadow(
+                        candidate,
+                        carrier.pos,
+                        enemy_goal,
+                        config.lane_radius,
+                    );
+                    if shadow <= zero {
+                        zero
+                    } else {
+                        shadow * value::closeness(candidate, enemy_goal, config)
+                    }
                 }
             }
-            removed
         };
         // Ball-watching: add a pull toward the carrier that fades with distance,
         // so a low-Positioning player's argmax shades toward the ball.
