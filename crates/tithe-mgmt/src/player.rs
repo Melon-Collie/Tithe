@@ -118,7 +118,15 @@ pub struct Player {
     ///
     /// [`Career::advance_season`]: crate::Career::advance_season
     pub season_usage: Usage,
+    /// Career matches featured in — never reset. Drives **scouting**: the more a
+    /// player has been seen, the tighter his scouted bands (design doc §3, the
+    /// exposure dial). See [`crate::scouting`].
+    pub appearances: u32,
 }
+
+/// A generated player's assumed matches-per-year before the career starts, so a
+/// generated veteran reads as well-scouted and a fresh prospect as an unknown.
+const PRESUMED_GAMES_PER_YEAR: u32 = 12;
 
 impl Player {
     /// Generate a player with the given identity and name. Draws a ceiling and an
@@ -140,12 +148,16 @@ impl Player {
             development_risk,
             age: 18,
             season_usage: Usage::default(),
+            appearances: 0,
         };
         // No match history when synthesizing a career — uniform growth toward the
         // ceiling, so a generated veteran is a coherent aged-up youngster.
         while player.age < target_age {
             model.advance(&mut player, &Usage::uniform(), rng);
         }
+        // Credit a plausible pre-career playing history for his age, so scouting
+        // starts him at a realistic confidence (a vet known, a rookie unknown).
+        player.appearances = (target_age - 18) as u32 * PRESUMED_GAMES_PER_YEAR;
         player
     }
 }

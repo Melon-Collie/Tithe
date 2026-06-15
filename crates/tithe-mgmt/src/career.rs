@@ -16,6 +16,7 @@
 use crate::club::{Club, Tactics};
 use crate::development::DevelopmentModel;
 use crate::player::{Player, PlayerId, Ratings};
+use crate::scouting::{ScoutConfig, ScoutReport};
 use crate::season::{Schedule, Season, Standing};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -202,6 +203,8 @@ impl Career {
             ratings: p.ratings,
             development_risk: 0,
             season_usage: crate::development::Usage::default(),
+            // A plausible pre-career history for his age, so he reads as scouted.
+            appearances: (p.age.saturating_sub(18)) as u32 * 12,
         });
         id
     }
@@ -279,8 +282,17 @@ impl Career {
         for (id, line) in roster_ids.iter().zip(&box_score.players) {
             if let Some(player) = self.players.iter_mut().find(|p| p.id == *id) {
                 player.season_usage.add_line(line);
+                player.appearances += 1; // exposure → tighter scouting
             }
         }
+    }
+
+    /// A scouting report on a pooled player — fuzzy bands over his true ratings,
+    /// tightened by how much he's been seen (see [`crate::scouting`]). The career
+    /// seed fixes the bands, so a report is stable across looks. Panics if the id
+    /// isn't in the pool.
+    pub fn scout(&self, id: PlayerId) -> ScoutReport {
+        ScoutConfig::default().scout(self.player(id), self.seed)
     }
 
     /// Play out the rest of the active season's fixtures, in schedule order.
