@@ -24,6 +24,14 @@
 //! *consumers* (CLI, web) own reading and writing save files. That keeps the
 //! save format a consumer concern and the career logic testable in isolation.
 //!
+//! ## A central player pool
+//!
+//! Players live in one pool on the [`Career`]; a [`Club`] holds only a roster of
+//! [`PlayerId`]s into it. A player on no roster is a **free agent** — the pool is
+//! what makes free agency, transfers, and drafts representable. (Their
+//! *behaviour* — signing, wages, contracts — is a later money slice; this layer
+//! just provides the shape.)
+//!
 //! ## Persistent vs. match-local identity
 //!
 //! A [`Player`] carries a stable [`PlayerId`] that lives for its whole career.
@@ -37,6 +45,6 @@ pub mod career;
 pub mod club;
 pub mod player;
 
-pub use career::{Career, MatchRecord, MatchResult};
+pub use career::{Career, MatchRecord, MatchResult, NewPlayer};
 pub use club::{Club, Tactics};
 pub use player::{Player, PlayerId, Ratings};
