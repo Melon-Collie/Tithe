@@ -721,7 +721,16 @@ impl Simulation {
         // the premier offensive task. (The realized charge accrues over the
         // wind-up — if a defender closes in, he converts worse than he hoped.)
         let distance = carrier_pos.distance_to(my_goal);
-        let shoot_contest = self.offering_contest(team, carrier_pos);
+        // The carrier judges his space against his *perceived* enemies (Awareness):
+        // he decides to offer, and how much charge to expect, on what he *thinks*
+        // is open. The wind-up then resolves on the truth — so a poor read commits
+        // him to a charge a defender he never saw is about to spoil.
+        let shoot_contest = self.offering_contest_of(
+            carrier_pos,
+            (0..n)
+                .filter(|&j| teams[j] != team && active[j])
+                .map(|j| (perceived[j], self.agents[j].attributes.contesting)),
+        );
         let base_prob = self.shot_probability(distance, attrs.accuracy, attrs.range, shoot_contest);
         let charge_potential = self.charge_potential(shoot_contest);
         let shoot_prob =
@@ -1021,19 +1030,37 @@ impl Simulation {
     /// bodies — you must put a marker on each potential offerer. That's what makes
     /// off-ball Positioning matter: leave a man open and he offers uncontested.
     fn offering_contest(&self, team: u8, carrier_pos: Vec2) -> Fx {
+        // The *real* contest (resolution + charge): enemies at their true spots.
+        self.offering_contest_of(
+            carrier_pos,
+            self.agents
+                .iter()
+                .filter(|a| a.team != team && a.is_active())
+                .map(|a| (a.pos, a.attributes.contesting)),
+        )
+    }
+
+    /// The tightest single marker's harry of a spot, over a supplied set of
+    /// `(enemy_pos, contesting)` — the shared core of [`offering_contest`]. Factored
+    /// out so the carrier's shoot *decision* can run it against his **perceived**
+    /// enemy positions (Awareness), while resolution runs it against the truth: a
+    /// low-Awareness carrier commits to an offer with a man closing he never saw.
+    fn offering_contest_of(
+        &self,
+        carrier_pos: Vec2,
+        enemies: impl Iterator<Item = (Vec2, Fx)>,
+    ) -> Fx {
         let radius = self.config.offering_contest_radius;
         let one = Fx::from_num(1);
         let mut tightest = Fx::from_num(0);
-        for agent in &self.agents {
-            if agent.team != team && agent.is_active() {
-                let d = agent.pos.distance_to(carrier_pos);
-                if d <= radius {
-                    // Closeness fades from 1 on the offerer to 0 at the harry edge,
-                    // so a tight marker contests hard and a loose one barely.
-                    let contribution = agent.attributes.contesting * (one - d / radius);
-                    if contribution > tightest {
-                        tightest = contribution;
-                    }
+        for (pos, contesting) in enemies {
+            let d = pos.distance_to(carrier_pos);
+            if d <= radius {
+                // Closeness fades from 1 on the offerer to 0 at the harry edge,
+                // so a tight marker contests hard and a loose one barely.
+                let contribution = contesting * (one - d / radius);
+                if contribution > tightest {
+                    tightest = contribution;
                 }
             }
         }
