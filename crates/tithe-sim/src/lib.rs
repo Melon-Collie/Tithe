@@ -657,7 +657,6 @@ impl Simulation {
         let aversion = self.config.turnover_aversion;
         let zero = Fx::from_num(0);
         let one = Fx::from_num(1);
-        let half = one / Fx::from_num(2);
 
         // Awareness: the carrier decides against his *perceived* field (positions
         // noised by his Awareness), but the pass *outcome* resolves on the truth —
@@ -800,7 +799,9 @@ impl Simulation {
         if best_pass_ev > carry_ev + self.config.pass_value_margin {
             let (receiver, _) = best_pass.expect("best_pass_ev came from Some");
             let (real_lane, _) = self.pass_lane(carrier_pos, real_pos[receiver as usize], team);
-            let completion = (real_lane * (half + attrs.passing)).clamp(zero, one);
+            let skill = self.config.pass_completion_floor
+                + self.config.pass_completion_gain * attrs.passing;
+            let completion = (real_lane * skill).clamp(zero, one);
             let pct = (completion * Fx::from_num(100)).to_num::<u64>();
             let completed = self.rng.below(100) < pct;
             // A failed roll is contested by the nearest defender within the wider

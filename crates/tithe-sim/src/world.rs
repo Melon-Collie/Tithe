@@ -121,6 +121,14 @@ pub struct SimConfig {
     pub pass_value_margin: Fx,
     /// Minimum completion chance (0..1) for a pass to be attempted at all.
     pub pass_min_lane: Fx,
+    /// Real-completion skill curve on an *attempted* pass: the completion roll is
+    /// `lane_clear × (floor + gain·Passing)`. `floor` is the multiplier a
+    /// Passing-0 player gets on a clear lane; `gain` is how much Passing adds.
+    /// Lowering `floor` (or the pair) makes passing **less safe** — even clear
+    /// lanes can fail, which is what gives the read/coverage skills (Positioning,
+    /// Awareness) errant balls to feed on instead of a ~99%-completion game.
+    pub pass_completion_floor: Fx,
+    pub pass_completion_gain: Fx,
     /// Weight on turnover cost in the carry-vs-pass decision — how much a player
     /// fears losing the soul (×the value the opponent would gain).
     pub turnover_aversion: Fx,
@@ -280,12 +288,18 @@ impl Default for SimConfig {
             pass_max_dist: Fx::from_num(40),
             pass_value_margin: Fx::from_num(5) / Fx::from_num(100), // 0.05
             pass_min_lane: Fx::from_num(4) / Fx::from_num(10),      // 0.4
+            // Tuned (AI-vs-AI) for a real-sport feel: ~85% completion for average
+            // passers, with a wide Passing spread (poor ~50% on a clear lane, elite
+            // ~100%). Lower than the old auto-complete `0.5 + Passing` so the read
+            // skills (Positioning/Awareness) get errant balls to feed on.
+            pass_completion_floor: Fx::from_num(25) / Fx::from_num(100),
+            pass_completion_gain: Fx::from_num(1),
             turnover_aversion: Fx::from_num(1),
             value_span: Fx::from_num(90),
             pressure_radius: Fx::from_num(12),
             pressure_max: Fx::from_num(2),
             lane_radius: Fx::from_num(4),
-            intercept_lane_radius: Fx::from_num(9), // ~2 hexes — a defender reads a bad pass
+            intercept_lane_radius: Fx::from_num(14), // ~3.5 hexes — wide enough that errant passes get read (un-starves the Positioning read)
             intercept_read_floor: Fx::from_num(5) / Fx::from_num(10), // 0.5 — picks common, Positioning swings them
             stamina_drain_base: Fx::from_num(5) / Fx::from_num(10000), // 0.0005
             stamina_drain_per_unit: Fx::from_num(25) / Fx::from_num(10000), // 0.0025
