@@ -225,6 +225,7 @@ mod tests {
             development_risk: 0, // no noise: track the projection exactly
             season_usage: Usage::default(),
             appearances: 0,
+            contract: None,
         };
         let start = p.ratings.overall();
         for _ in 0..6 {
@@ -252,6 +253,7 @@ mod tests {
             development_risk: 0,
             season_usage: Usage::default(),
             appearances: 0,
+            contract: None,
         };
         for _ in 0..5 {
             model.advance(&mut p, &Usage::uniform(), &mut Rng::new(1));
@@ -279,6 +281,7 @@ mod tests {
             development_risk: 100,
             season_usage: Usage::default(),
             appearances: 0,
+            contract: None,
         };
         model.advance(&mut p, &Usage::uniform(), &mut Rng::new(42));
         assert_eq!(p.ratings, level, "no change at exactly the peak age");
@@ -299,6 +302,7 @@ mod tests {
             development_risk: 0,
             season_usage: Usage::default(),
             appearances: 0,
+            contract: None,
         };
         let mut a = make();
         let mut b = make();
@@ -323,6 +327,7 @@ mod tests {
             development_risk: 0, // isolate the usage effect from noise
             season_usage: Usage::default(),
             appearances: 0,
+            contract: None,
         };
 
         // A season of nothing but offerings (exercises shooting, not passing).

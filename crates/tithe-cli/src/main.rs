@@ -23,6 +23,7 @@ mod boxscore;
 mod career;
 mod coach;
 mod develop;
+mod finances;
 mod init;
 mod log;
 mod possession;
@@ -50,6 +51,7 @@ fn main() {
         Some("season") => season::run(&args[2..]),
         Some("develop") => develop::run(&args[2..]),
         Some("scout") => scout::run(&args[2..]),
+        Some("finances") => finances::run(&args[2..]),
         Some("init") => init::run(&args[2..]),
         _ => {
             eprintln!("usage:");
@@ -74,6 +76,9 @@ fn main() {
             );
             eprintln!(
                 "  tithe scout      [--seed N] [--seasons N]   # scouting reports (fuzzy bands)"
+            );
+            eprintln!(
+                "  tithe finances   [--seed N]   # cap, payroll, and the development-budget lever"
             );
             eprintln!("  tithe init     [--out FILE]   # write an editable example setup");
             std::process::exit(2);
