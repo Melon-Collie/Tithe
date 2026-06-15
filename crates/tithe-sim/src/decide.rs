@@ -172,6 +172,13 @@ pub fn off_ball_target(
     // low one ignores it and bunches. `allies` includes this agent's own position
     // (skipped below) and the carrier.
     let spacing = config.positioning_spacing * agent.attributes.positioning;
+    // Man-coverage: a *positioning-scaled* instinct to smother the dangerous
+    // attacker in your zone — get tight enough to deny him space, not just shadow
+    // his lane. High Positioning → you cover your man and drive down his openness;
+    // low Positioning → you ignore coverage and only shadow lanes / watch the ball,
+    // leaving him open. This is the channel that lets Positioning actually reduce
+    // the openness it's judged by (lane-shadowing alone never gets near the man).
+    let man_cover = config.man_coverage_weight * agent.attributes.positioning;
 
     let mut best = agent.anchor;
     let mut best_score = Fx::from_num(-1);
@@ -240,6 +247,32 @@ pub fn off_ball_target(
                 }
             }
         };
+        // Man-coverage (defenders only): reward smothering the most dangerous
+        // attacker the candidate can get *near* (within `pressure_radius`), so a
+        // high-Positioning defender's argmax sits tight on his man and cuts the
+        // man's openness — what lane-shadowing never does. The footprint bounds
+        // candidates, so each defender covers the dangerous man in his own zone.
+        let cover = if attacking || cheat {
+            zero
+        } else {
+            let mut best_cover = zero;
+            for &receiver in enemies {
+                if receiver == carrier.pos {
+                    continue; // the carrier, not a man to cover
+                }
+                let near =
+                    (one - candidate.distance_to(receiver) / config.pressure_radius).max(zero);
+                if near <= zero {
+                    continue;
+                }
+                let threat = value::value_at(receiver, enemy_goal, allies, config);
+                let c = near * threat;
+                if c > best_cover {
+                    best_cover = c;
+                }
+            }
+            best_cover
+        };
         // Ball-watching: add a pull toward the carrier that fades with distance,
         // so a low-Positioning player's argmax shades toward the ball.
         let closeness = (one - candidate.distance_to(carrier.pos) / config.pass_max_dist).max(zero);
@@ -255,7 +288,7 @@ pub fn off_ball_target(
                 crowd = c;
             }
         }
-        let score = (raw + ball_pull * closeness - spacing * crowd) * falloff;
+        let score = (raw + man_cover * cover + ball_pull * closeness - spacing * crowd) * falloff;
         if score > best_score {
             best_score = score;
             best = candidate;
