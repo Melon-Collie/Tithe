@@ -23,7 +23,7 @@ use tithe_sim::{
 /// ordering, so this tool can't drift from it.
 struct Player {
     name: String,
-    attrs: [u8; 9],
+    attrs: [u8; 10],
 }
 
 /// One positional slot: the role-pair (what it wants) plus its phase anchors as
@@ -65,11 +65,11 @@ fn templates() -> Vec<Template> {
             slots: [
                 //   label    attack    defend     atk[q,r]  def[q,r]
                 s("Goalie", Outlet, Sweeper, 3, 0, 5, 0),
-                s("Def-L", Outlet, Warden, 2, -1, 4, -1),
-                s("Def-R", Outlet, Warden, 1, 1, 3, 1),
-                s("Mid-L", Roamer, Presser, -2, -2, 1, -2),
-                s("Mid-C", Playmaker, Tracker, -1, 0, 2, 0),
-                s("Mid-R", Roamer, Presser, -3, 2, 0, 2),
+                s("Def-L", Outlet, Marker, 2, -1, 4, -1),
+                s("Def-R", Outlet, Marker, 1, 1, 3, 1),
+                s("Mid-L", Runner, Hawk, -2, -2, 1, -2),
+                s("Mid-C", Playmaker, Marker, -1, 0, 2, 0),
+                s("Mid-R", Runner, Hawk, -3, 2, 0, 2),
                 s("Fwd", Finisher, Cheat, -5, 0, -1, 0),
             ],
         },
@@ -78,11 +78,11 @@ fn templates() -> Vec<Template> {
             name: "3-2-1",
             slots: [
                 s("Goalie", Outlet, Sweeper, 3, 0, 5, 0),
-                s("Def-L", Outlet, Warden, 2, -2, 4, -2),
-                s("Def-C", BoxToBox, Destroyer, 2, 0, 4, 0),
-                s("Def-R", Outlet, Warden, 0, 2, 2, 2),
-                s("Mid-L", Roamer, Presser, -2, -1, 1, -1),
-                s("Mid-R", Playmaker, Tracker, -3, 1, 0, 1),
+                s("Def-L", Outlet, Marker, 2, -2, 4, -2),
+                s("Def-C", Runner, Destroyer, 2, 0, 4, 0),
+                s("Def-R", Outlet, Marker, 0, 2, 2, 2),
+                s("Mid-L", Pivot, Hawk, -2, -1, 1, -1),
+                s("Mid-R", Playmaker, Hawk, -3, 1, 0, 1),
                 s("Fwd", Finisher, Cheat, -5, 0, -1, 0),
             ],
         },
@@ -92,8 +92,8 @@ fn templates() -> Vec<Template> {
 /// Build a want-vector from named weights (any attribute left out is 0).
 /// Keying by [`Attribute`] instead of writing bare positional literals means a
 /// reorder of the attribute set can't silently misalign a role's priorities.
-fn want(pairs: &[(Attribute, f64)]) -> [f64; 9] {
-    let mut w = [0.0; 9];
+fn want(pairs: &[(Attribute, f64)]) -> [f64; 10] {
+    let mut w = [0.0; 10];
     for &(a, v) in pairs {
         w[a as usize] = v;
     }
@@ -101,47 +101,57 @@ fn want(pairs: &[(Attribute, f64)]) -> [f64; 9] {
 }
 
 /// What an in-possession role leans on (weights over the attributes).
-fn attack_want(r: IP) -> [f64; 9] {
+fn attack_want(r: IP) -> [f64; 10] {
     use Attribute::*;
     match r {
-        IP::BoxToBox => want(&[(Handling, 2.), (Contesting, 1.), (Passing, 1.), (Pace, 2.)]),
-        IP::Roamer => want(&[(Handling, 2.), (Stripping, 1.), (Pace, 2.)]),
-        IP::Playmaker => want(&[(Passing, 3.), (Positioning, 1.), (Awareness, 2.)]),
-        IP::Outlet => want(&[(Handling, 2.), (Passing, 2.), (Positioning, 1.)]),
+        // Runner really wants Pace, and the Endurance to keep driving at space.
+        IP::Runner => want(&[
+            (Pace, 3.),
+            (Endurance, 2.),
+            (Handling, 2.),
+            (Contesting, 1.),
+        ]),
+        IP::Outlet => want(&[(Passing, 3.), (Handling, 1.), (Positioning, 2.)]),
+        IP::Pivot => want(&[(Passing, 3.), (Awareness, 2.), (Positioning, 1.)]),
+        IP::Playmaker => want(&[(Passing, 2.), (Handling, 2.), (Awareness, 2.)]),
         IP::Finisher => want(&[(Accuracy, 3.), (Range, 2.), (Pace, 1.)]),
     }
 }
 
 /// What an out-of-possession role leans on.
-fn defend_want(r: OP) -> [f64; 9] {
+fn defend_want(r: OP) -> [f64; 10] {
     use Attribute::*;
     match r {
-        OP::Destroyer => want(&[(Stripping, 3.), (Pace, 2.)]),
-        OP::Presser => want(&[(Stripping, 2.), (Contesting, 2.), (Pace, 2.)]),
-        OP::Warden => want(&[(Handling, 1.), (Contesting, 2.), (Positioning, 2.)]),
         OP::Sweeper => want(&[(Handling, 1.), (Stripping, 1.), (Positioning, 3.)]),
+        OP::Marker => want(&[(Positioning, 2.), (Awareness, 2.), (Contesting, 2.)]),
+        OP::Destroyer => want(&[(Stripping, 3.), (Pace, 2.)]),
+        OP::Hawk => want(&[
+            (Contesting, 2.),
+            (Awareness, 2.),
+            (Positioning, 1.),
+            (Pace, 1.),
+        ]),
         OP::Cheat => want(&[(Accuracy, 2.), (Range, 1.), (Pace, 2.)]),
-        OP::Tracker => want(&[(Contesting, 2.), (Positioning, 2.), (Awareness, 1.)]),
     }
 }
 
 /// The combined attribute want of a slot (its two roles).
-fn slot_want(slot: &Slot) -> [f64; 9] {
+fn slot_want(slot: &Slot) -> [f64; 10] {
     let a = attack_want(slot.attack);
     let d = defend_want(slot.defend);
     std::array::from_fn(|k| a[k] + d[k])
 }
 
 /// How well a player suits a want (dot product of want · attributes).
-fn fit(want: &[f64; 9], attrs: &[u8; 9]) -> f64 {
-    (0..9).map(|k| want[k] * attrs[k] as f64).sum()
+fn fit(want: &[f64; 10], attrs: &[u8; 10]) -> f64 {
+    (0..10).map(|k| want[k] * attrs[k] as f64).sum()
 }
 
 /// Best assignment of players to slots, maximizing total fit. Brute-forces all
 /// 7! orderings (5040 — trivial) for an exact, deterministic answer.
 /// `wants[slot]` is the slot's want; returns `(total_fit, assignment)` where
 /// `assignment[slot]` is the chosen player index.
-fn best_assignment(wants: &[[f64; 9]], players: &[Player]) -> (f64, Vec<usize>) {
+fn best_assignment(wants: &[[f64; 10]], players: &[Player]) -> (f64, Vec<usize>) {
     let n = wants.len();
     let mut used = vec![false; n];
     let mut cur = vec![0usize; n];
@@ -149,7 +159,7 @@ fn best_assignment(wants: &[[f64; 9]], players: &[Player]) -> (f64, Vec<usize>) 
     fn go(
         slot: usize,
         acc: f64,
-        wants: &[[f64; 9]],
+        wants: &[[f64; 10]],
         players: &[Player],
         used: &mut [bool],
         cur: &mut [usize],
@@ -180,7 +190,7 @@ fn best_assignment(wants: &[[f64; 9]], players: &[Player]) -> (f64, Vec<usize>) 
 fn coach<'a>(players: &[Player], templates: &'a [Template]) -> (&'a Template, f64, Vec<usize>) {
     let mut best: Option<(&Template, f64, Vec<usize>)> = None;
     for t in templates {
-        let wants: Vec<[f64; 9]> = t.slots.iter().map(slot_want).collect();
+        let wants: Vec<[f64; 10]> = t.slots.iter().map(slot_want).collect();
         let (total, assign) = best_assignment(&wants, players);
         if best.as_ref().is_none_or(|b| total > b.1) {
             best = Some((t, total, assign));
@@ -190,7 +200,7 @@ fn coach<'a>(players: &[Player], templates: &'a [Template]) -> (&'a Template, f6
 }
 
 /// A player's two standout attributes, for legible output.
-fn standouts(attrs: &[u8; 9]) -> String {
+fn standouts(attrs: &[u8; 10]) -> String {
     let mut ranked = Attribute::ALL;
     ranked.sort_by_key(|&a| std::cmp::Reverse(attrs[a as usize]));
     let label = |a: Attribute| format!("{} {}", a.short(), attrs[a as usize]);
@@ -203,12 +213,12 @@ fn generate_squad(seed: u64, prefix: char) -> Vec<Player> {
     let mut rng = Rng::new(seed);
     let mut players = Vec::new();
     for i in 0..7 {
-        let mut attrs = [0u8; 9];
+        let mut attrs = [0u8; 10];
         for a in attrs.iter_mut() {
             *a = 30 + rng.below(40) as u8; // 30..70 baseline
         }
         for _ in 0..1 + rng.below(2) {
-            attrs[rng.below(9) as usize] = 80 + rng.below(20) as u8; // a spike or two
+            attrs[rng.below(10) as usize] = 80 + rng.below(20) as u8; // a spike or two
         }
         players.push(Player {
             name: format!("{prefix}{i}"),
@@ -251,6 +261,7 @@ fn build_team(
                 positioning: g(Attribute::Positioning),
                 pace: g(Attribute::Pace),
                 awareness: g(Attribute::Awareness),
+                endurance: g(Attribute::Endurance),
             }
         })
         .collect();
@@ -276,7 +287,7 @@ fn report(squad_name: &str, players: &[Player], templates: &[Template]) -> (usiz
         .unwrap();
     println!("\n== {squad_name}: {} (fit {total:.0}) ==", chosen.name);
     for t in templates {
-        let wants: Vec<[f64; 9]> = t.slots.iter().map(slot_want).collect();
+        let wants: Vec<[f64; 10]> = t.slots.iter().map(slot_want).collect();
         let (tf, _) = best_assignment(&wants, players);
         let mark = if std::ptr::eq(t, chosen) { " <-" } else { "" };
         println!("    {:<6} fit {:>6.0}{}", t.name, tf, mark);

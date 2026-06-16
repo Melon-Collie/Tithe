@@ -52,12 +52,12 @@ impl Tactics {
             },
             roles: vec![
                 (IP::Outlet, OP::Sweeper),
-                (IP::Roamer, OP::Warden),
-                (IP::Playmaker, OP::Tracker),
-                (IP::BoxToBox, OP::Warden),
-                (IP::Roamer, OP::Presser),
+                (IP::Runner, OP::Marker),
+                (IP::Pivot, OP::Hawk),
+                (IP::Playmaker, OP::Marker),
+                (IP::Runner, OP::Destroyer),
                 (IP::Finisher, OP::Cheat),
-                (IP::Roamer, OP::Destroyer),
+                (IP::Pivot, OP::Destroyer),
             ],
         }
     }

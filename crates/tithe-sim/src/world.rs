@@ -39,9 +39,6 @@ pub struct SimConfig {
     /// How close an enemy carrier must be before a defender breaks shape to
     /// close it down (larger than strip_radius — close first, then lunge).
     pub contest_range: Fx,
-    /// How far goal-side of the carrier the pressing defender sits (containment
-    /// — take away the straight line so the carrier can't stroll through).
-    pub pressure_containment_dist: Fx,
     /// How far ahead a carry route looks toward the goal.
     pub carry_lookahead: Fx,
     /// Lateral spacing of the carry-route candidates (to go around pressure).
@@ -49,6 +46,13 @@ pub struct SimConfig {
     /// Distance from a carry route within which a defender threatens it (the
     /// risk that routes the carrier around pressure).
     pub carry_contest_radius: Fx,
+    /// Floor on a defender's carry-route obstacle value at Positioning 0 (rising to
+    /// 1 at Positioning 1): his path-risk contribution is scaled by
+    /// `floor + (1 − floor)·Positioning`. This is the lever that makes containment
+    /// (and carry defense generally) scale with Positioning — a sound defender
+    /// walls the lane, a poorly-positioned one gets driven past. `1` = Positioning
+    /// doesn't matter here; `0` = a Positioning-0 defender is no obstacle at all.
+    pub carry_evade_floor: Fx,
     /// Strip-win percent when defender Stripping equals carrier Handling — the
     /// even-match baseline the attribute gap swings around.
     pub strip_even_pct: Fx,
@@ -57,8 +61,28 @@ pub struct SimConfig {
     pub strip_spread_pct: Fx,
     /// Ticks a whiffed defender is staggered (beaten, can't act).
     pub stagger_ticks: u32,
-    /// Ticks an offering takes to resolve (the wind-up defenders can arrive in).
-    pub offering_windup: u32,
+    /// Given a strip *wins* (a turnover happens), the floor on it being a **clean**
+    /// steal vs the soul merely poked loose: `clean = floor + (1 − floor)·Stripping`.
+    /// A great stripper takes it cleanly; a marginal one knocks it free into a
+    /// scramble. Turnovers are no longer all-or-nothing.
+    pub strip_clean_floor: Fx,
+    /// Given a failed pass is **disrupted** by a lane defender, the floor on it
+    /// being a **clean** interception vs **tipped** loose:
+    /// `clean = floor + (1 − floor)·Contesting`. A defender with good hands catches
+    /// the errant ball; a poor one only deflects it into open play. (Positioning is
+    /// the *read* — whether he capitalizes at all; Contesting is the *control*.)
+    pub intercept_clean_floor: Fx,
+    /// How much **Stripping** biases a contested loose-ball claim (the scramble).
+    /// A loose soul is won by a seeded draw *weighted* by `1 + this·Stripping`, so
+    /// ball-winners gather poked-free souls more often than whoever's merely
+    /// nearest — possession follows merit, not proximity-luck. `0` = uniform draw.
+    pub loose_ball_skill_weight: Fx,
+    /// Ticks of **uncontested** holding to build a *full* charge — the offering's
+    /// slow wind-up. Charging is powerful but slow: an open offerer charges toward
+    /// a near-certain bomb over this many ticks, but it resolves early (at partial
+    /// charge) the instant a defender closes in. Long enough that the defense can
+    /// recover and contest the offer — the race is the drama.
+    pub charge_full_ticks: u32,
     /// Base offering success at point-blank (before Accuracy and contest).
     pub offering_base: Fx,
     /// Extra success from the carrier's Accuracy (added to base, ×accuracy).
@@ -75,6 +99,16 @@ pub struct SimConfig {
     pub offering_contest_radius: Fx,
     /// Maximum total contest (cap on summed Contesting) — leaves a slim chance.
     pub offering_contest_max: Fx,
+    /// Charge multiplier on conversion at **full** charge — the payoff for
+    /// offering from space. Conversion = base shot prob × `(1 + charge × gain)`,
+    /// so a fully-charged shot from open space converts far better than a snap
+    /// one. Charge accrues only while the offerer is uncontested (see
+    /// `charge_contest_ceiling`), so space *is* the charge: this is what makes
+    /// creating space the premier offensive task.
+    pub charge_conversion_gain: Fx,
+    /// Contest level (the tightest marker's harry, in `[0, 1]`) at or above which
+    /// charge stops accruing — a defender in the offerer's face spoils the charge.
+    pub charge_contest_ceiling: Fx,
     /// How far a missed offering's soul is spat back out from the goal.
     pub rebound_distance: Fx,
     /// Souls a team must bank to win the match (first-to-X).
@@ -87,6 +121,14 @@ pub struct SimConfig {
     pub pass_value_margin: Fx,
     /// Minimum completion chance (0..1) for a pass to be attempted at all.
     pub pass_min_lane: Fx,
+    /// Real-completion skill curve on an *attempted* pass: the completion roll is
+    /// `lane_clear × (floor + gain·Passing)`. `floor` is the multiplier a
+    /// Passing-0 player gets on a clear lane; `gain` is how much Passing adds.
+    /// Lowering `floor` (or the pair) makes passing **less safe** — even clear
+    /// lanes can fail, which is what gives the read/coverage skills (Positioning,
+    /// Awareness) errant balls to feed on instead of a ~99%-completion game.
+    pub pass_completion_floor: Fx,
+    pub pass_completion_gain: Fx,
     /// Weight on turnover cost in the carry-vs-pass decision — how much a player
     /// fears losing the soul (×the value the opponent would gain).
     pub turnover_aversion: Fx,
@@ -111,10 +153,23 @@ pub struct SimConfig {
     pub intercept_read_floor: Fx,
     /// Stamina lost per tick just by being on the field (active).
     pub stamina_drain_base: Fx,
-    /// Extra stamina lost per unit of distance moved (effort — pressers tire fastest).
+    /// Extra stamina lost per unit of distance moved (effort — the hardest workers tire fastest).
     pub stamina_drain_per_unit: Fx,
     /// Speed multiplier at empty stamina (full stamina = 1.0). Gassed = slower.
     pub stamina_speed_floor: Fx,
+    /// Drain multiplier at **Endurance 1** (vs 1.0 at Endurance 0): drain is scaled
+    /// by `1 − (1 − floor)·Endurance`, so a high-Endurance engine burns stamina
+    /// slower. `1` makes Endurance ignore drain.
+    pub endurance_drain_floor: Fx,
+    /// Stamina recovered **between rounds** at Endurance 0 — the base of the
+    /// partial recovery that replaced the old full reset. Set below a round's
+    /// typical drain so a hard-working low-Endurance player accumulates fatigue
+    /// over a match (the "play longer" lever).
+    pub recovery_base: Fx,
+    /// Extra between-round recovery per unit of Endurance (added to `recovery_base`,
+    /// ×Endurance). A high-Endurance player recovers ~fully each round; a low one
+    /// fades. Recovery is capped at full (1.0).
+    pub recovery_gain: Fx,
     /// Speed multiplier at Pace 0 and Pace 1 — a player's top speed is
     /// interpolated between these (Pace 0.5 ≈ the average 1.0).
     pub pace_floor: Fx,
@@ -142,6 +197,14 @@ pub struct SimConfig {
     /// spot. Positioning is *skill* (a corrupted objective), not jitter. `0`
     /// makes Positioning a no-op.
     pub positioning_ball_pull: Fx,
+    /// Man-coverage weight for a Positioning-1 defender (scales *with* positioning).
+    /// Off the ball, a high-Positioning defender is rewarded for sitting within
+    /// `pressure_radius` of the dangerous attacker in his zone — denying him space,
+    /// not just shadowing his lane — which drives down that man's openness. A
+    /// low-Positioning defender weights this ~0 and leaves his man open. This is
+    /// the channel that makes Positioning reduce conceded openness (and thus
+    /// contest offers / force worse passes); `0` makes it a no-op.
+    pub man_coverage_weight: Fx,
     /// Spacing weight for a Positioning-1 player (scales *with* positioning). Off
     /// the ball, a high-Positioning player is penalized for choosing a hex near a
     /// teammate, so he spreads to fill gaps and cover distinct threats; a low one
@@ -208,45 +271,63 @@ impl Default for SimConfig {
             goal_x: Fx::from_num(45),
             strip_radius: Fx::from_num(3),
             contest_range: Fx::from_num(25),
-            pressure_containment_dist: Fx::from_num(2), // within strip_radius (3): contain AND strip
             carry_lookahead: Fx::from_num(15),
             carry_lateral: Fx::from_num(6),
             carry_contest_radius: Fx::from_num(7),
+            carry_evade_floor: Fx::from_num(4) / Fx::from_num(10), // Pos 0 ⇒ 40% obstacle, Pos 1 ⇒ full
+
             strip_even_pct: Fx::from_num(50), // even Stripping vs Handling ≈ coin flip
             strip_spread_pct: Fx::from_num(60), // a 0.2 attribute edge ≈ ±12 points
             stagger_ticks: 15,
-            offering_windup: 8,
-            offering_base: Fx::from_num(4) / Fx::from_num(10), // 0.4
-            offering_accuracy_gain: Fx::from_num(5) / Fx::from_num(10), // 0.5 → accuracy 0.5 ⇒ 0.65 peak
+            strip_clean_floor: Fx::from_num(35) / Fx::from_num(100), // Str 0 ⇒ 35% clean, Str 1 ⇒ 100%
+            intercept_clean_floor: Fx::from_num(30) / Fx::from_num(100), // Pos 0 ⇒ 30% clean, else tipped loose
+            loose_ball_skill_weight: Fx::from_num(15) / Fx::from_num(10), // Str 1 reacher ≈ 2.5× the draw weight
+            charge_full_ticks: 24, // ~2 decision windows of space to fully charge
+            // Lower floor than the pre-charge game: a snap/contested offer is a
+            // poor look (~0.25–0.45 peak); space is what makes it dangerous (below).
+            offering_base: Fx::from_num(25) / Fx::from_num(100), // 0.25
+            offering_accuracy_gain: Fx::from_num(45) / Fx::from_num(100), // 0.45 → acc 0.5 ⇒ 0.475 peak
             // Range 0 ⇒ effective to ~5 units; Range 0.85 ⇒ ~26 (a perimeter threat).
             shot_base_range: Fx::from_num(5),
             shot_range_gain: Fx::from_num(25),
             shot_value: Fx::from_num(3), // tuned against AI-vs-AI shot/score rates
             offering_contest_radius: Fx::from_num(7),
             offering_contest_max: Fx::from_num(9) / Fx::from_num(10), // 0.9
+            charge_conversion_gain: Fx::from_num(1), // full charge ⇒ ×2.0 (a bomb — but hard to earn)
+            charge_contest_ceiling: Fx::from_num(2) / Fx::from_num(10), // any real harry (≥0.2) forces release
             rebound_distance: Fx::from_num(20),
             souls_to_win: 11,
             pass_speed: Fx::from_num(8),
             pass_max_dist: Fx::from_num(40),
             pass_value_margin: Fx::from_num(5) / Fx::from_num(100), // 0.05
             pass_min_lane: Fx::from_num(4) / Fx::from_num(10),      // 0.4
+            // Tuned (AI-vs-AI) for a real-sport feel: ~85% completion for average
+            // passers, with a wide Passing spread (poor ~50% on a clear lane, elite
+            // ~100%). Lower than the old auto-complete `0.5 + Passing` so the read
+            // skills (Positioning/Awareness) get errant balls to feed on.
+            pass_completion_floor: Fx::from_num(25) / Fx::from_num(100),
+            pass_completion_gain: Fx::from_num(1),
             turnover_aversion: Fx::from_num(1),
             value_span: Fx::from_num(90),
             pressure_radius: Fx::from_num(12),
             pressure_max: Fx::from_num(2),
             lane_radius: Fx::from_num(4),
-            intercept_lane_radius: Fx::from_num(9), // ~2 hexes — a defender reads a bad pass
+            intercept_lane_radius: Fx::from_num(14), // ~3.5 hexes — wide enough that errant passes get read (un-starves the Positioning read)
             intercept_read_floor: Fx::from_num(5) / Fx::from_num(10), // 0.5 — picks common, Positioning swings them
             stamina_drain_base: Fx::from_num(5) / Fx::from_num(10000), // 0.0005
             stamina_drain_per_unit: Fx::from_num(25) / Fx::from_num(10000), // 0.0025
             stamina_speed_floor: Fx::from_num(55) / Fx::from_num(100), // 0.55
-            pace_floor: Fx::from_num(75) / Fx::from_num(100),         // 0.75 (Pace 0)
-            pace_ceil: Fx::from_num(125) / Fx::from_num(100),         // 1.25 (Pace 1)
-            footprint_edge_softness: Fx::from_num(3),                 // firm but soft at the edge
-            footprint_edge_max: Fx::from_num(4), // never stray past 2× the radius
+            endurance_drain_floor: Fx::from_num(5) / Fx::from_num(10), // End 1 ⇒ ½ drain
+            recovery_base: Fx::from_num(3) / Fx::from_num(10), // End 0 recovers +0.30/round (< typical drain ~0.46)
+            recovery_gain: Fx::from_num(6) / Fx::from_num(10), // End 1 recovers +0.90/round (≈ full)
+            pace_floor: Fx::from_num(75) / Fx::from_num(100),  // 0.75 (Pace 0)
+            pace_ceil: Fx::from_num(125) / Fx::from_num(100),  // 1.25 (Pace 1)
+            footprint_edge_softness: Fx::from_num(3),          // firm but soft at the edge
+            footprint_edge_max: Fx::from_num(4),               // never stray past 2× the radius
             carry_tether_floor: Fx::from_num(6) / Fx::from_num(10), // 0.6 — reluctance, not refusal
             positioning_ball_pull: Fx::from_num(8) / Fx::from_num(10), // 0.8 pull at Positioning 0
             positioning_spacing: Fx::from_num(2) / Fx::from_num(10), // 0.2 — A/B off vs on
+            man_coverage_weight: Fx::from_num(2), // Pos 1 defender smothers his man; Pos 0 ignores it
             awareness_noise_max: Fx::from_num(6), // Awareness 0 at ref dist ⇒ ±6
             awareness_ref_dist: Fx::from_num(20),
             separation_radius: Fx::from_num(5) / Fx::from_num(2), // 2.5 (< strip_radius 3)
@@ -259,47 +340,57 @@ impl Default for SimConfig {
             // Edit a row to change how a role plays.
             role_biases: {
                 let bias =
-                    |carry: u32, pass: u32, shoot: u32, gate: u32, hx: u32, hy: u32| OnBallBias {
-                        carry_mult: Fx::from_num(carry) / Fx::from_num(100),
-                        pass_mult: Fx::from_num(pass) / Fx::from_num(100),
-                        shoot_mult: Fx::from_num(shoot) / Fx::from_num(100),
-                        min_shoot_prob: Fx::from_num(gate) / Fx::from_num(100),
-                        footprint: Footprint {
-                            half_x: Fx::from_num(hx),
-                            half_y: Fx::from_num(hy),
-                            lean: Fx::from_num(0),
-                        },
+                    |carry: u32, pass: u32, shoot: u32, gate: u32, hx: u32, hy: u32, lean: u32| {
+                        OnBallBias {
+                            carry_mult: Fx::from_num(carry) / Fx::from_num(100),
+                            pass_mult: Fx::from_num(pass) / Fx::from_num(100),
+                            shoot_mult: Fx::from_num(shoot) / Fx::from_num(100),
+                            min_shoot_prob: Fx::from_num(gate) / Fx::from_num(100),
+                            footprint: Footprint {
+                                half_x: Fx::from_num(hx),
+                                half_y: Fx::from_num(hy),
+                                lean: Fx::from_num(lean),
+                            },
+                        }
                     };
                 RoleBiases {
-                    //                  carry pass shoot gate  hx  hy   shape
-                    box_to_box: bias(110, 100, 90, 0, 16, 6), // long lane along the field
-                    roamer: bias(100, 100, 90, 0, 6, 16),     // wide flat band across
-                    playmaker: bias(90, 140, 80, 0, 9, 9),    // compact
-                    outlet: bias(40, 130, 70, 0, 8, 8),       // compact, recycles
-                    finisher: bias(90, 90, 140, 0, 9, 9),     // shell, shoots
+                    //                 carry pass shoot gate  hx  hy lean  shape
+                    runner: bias(135, 90, 90, 0, 16, 10, 0), // long lane + width, drives at space
+                    outlet: bias(40, 135, 60, 0, 8, 16, 0), // wide band across, recycles, stays back
+                    pivot: bias(60, 150, 55, 0, 9, 9, 0),   // compact connector, quick release
+                    playmaker: bias(105, 130, 95, 0, 10, 10, 3), // drives + high-value passes, forward
+                    finisher: bias(90, 90, 140, 0, 9, 9, 0),     // shell, shoots
                 }
             },
             // Out-of-possession role table (§14). contest-range in %, lunge gate
-            // in % strip-chance, footprint half_x × half_y + forward lean.
+            // in % strip-chance, containment standoff (goal-side, field units),
+            // footprint half_x × half_y + forward lean, and the off-ball mode.
             defense_biases: {
-                let def =
-                    |contest: u32, lunge_gate: u32, hx: u32, hy: u32, lean: u32| DefenseBias {
-                        contest_range_mult: Fx::from_num(contest) / Fx::from_num(100),
-                        lunge_min_prob: Fx::from_num(lunge_gate) / Fx::from_num(100),
-                        footprint: Footprint {
-                            half_x: Fx::from_num(hx),
-                            half_y: Fx::from_num(hy),
-                            lean: Fx::from_num(lean),
-                        },
-                    };
+                let def = |contest: u32,
+                           lunge_gate: u32,
+                           contain: u32,
+                           hx: u32,
+                           hy: u32,
+                           lean: u32,
+                           off: OffBallMode| DefenseBias {
+                    contest_range_mult: Fx::from_num(contest) / Fx::from_num(100),
+                    lunge_min_prob: Fx::from_num(lunge_gate) / Fx::from_num(100),
+                    containment_dist: Fx::from_num(contain),
+                    off_ball: off,
+                    footprint: Footprint {
+                        half_x: Fx::from_num(hx),
+                        half_y: Fx::from_num(hy),
+                        lean: Fx::from_num(lean),
+                    },
+                };
+                use OffBallMode::{DrivingLanes, PassingLanes};
                 DefenseBiases {
-                    //              contest lunge  hx  hy  lean   shape
-                    destroyer: def(100, 0, 6, 6, 0), // tiny, trigger-happy
-                    presser: def(160, 0, 8, 8, 10),  // forward-leaning, aggressive
-                    warden: def(80, 35, 16, 14, 0),  // large, patient
-                    sweeper: def(60, 40, 6, 18, 0),  // wide band across the last line
-                    cheat: def(0, 90, 8, 8, 0),      // no challenge; offensive positioning
-                    tracker: def(100, 20, 16, 6, 0), // long lane along the field
+                    //             contest lunge contain hx  hy lean  off-ball
+                    sweeper: def(60, 40, 2, 6, 18, 0, DrivingLanes), // wide last line, contains, walls off drives
+                    marker: def(80, 35, 2, 9, 11, 0, PassingLanes), // man-marker, contains, denies the pass
+                    destroyer: def(130, 0, 0, 10, 10, 0, DrivingLanes), // big aggressive circle, attacks the ball
+                    hawk: def(150, 5, 0, 16, 6, 0, PassingLanes), // lane-jumper, gambles to pick
+                    cheat: def(0, 90, 2, 8, 8, 0, PassingLanes), // no challenge; offensive positioning
                 }
             },
         }
@@ -344,12 +435,12 @@ impl Formation {
     }
 }
 
-/// The nine player attributes in their **canonical order** — the one source of
+/// The ten player attributes in their **canonical order** — the one source of
 /// truth for any code that must iterate or index attributes positionally rather
 /// than name them (the coach's role-want vectors, scout summaries, the
 /// management UI's stat columns). The discriminant doubles as that index, so
 /// `Attribute::Handling as usize` is the slot Handling occupies in any
-/// `[_; 9]` attribute array. Keep this in lockstep with the fields of
+/// `[_; 10]` attribute array. Keep this in lockstep with the fields of
 /// [`Attributes`] and [`PlayerSetup`]; the `attribute_keys_match_fields` test
 /// fails loudly if they ever drift, so a reorder can't silently misalign.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -363,12 +454,13 @@ pub enum Attribute {
     Positioning,
     Pace,
     Awareness,
+    Endurance,
 }
 
 impl Attribute {
     /// Every attribute in canonical order — drive positional loops off this
-    /// rather than hand-writing `0..9`, so the order lives in exactly one place.
-    pub const ALL: [Attribute; 9] = [
+    /// rather than hand-writing `0..10`, so the order lives in exactly one place.
+    pub const ALL: [Attribute; 10] = [
         Attribute::Accuracy,
         Attribute::Range,
         Attribute::Handling,
@@ -378,6 +470,7 @@ impl Attribute {
         Attribute::Positioning,
         Attribute::Pace,
         Attribute::Awareness,
+        Attribute::Endurance,
     ];
 
     /// Short scout/box-score label.
@@ -392,6 +485,7 @@ impl Attribute {
             Attribute::Positioning => "Pos",
             Attribute::Pace => "Pace",
             Attribute::Awareness => "Awr",
+            Attribute::Endurance => "End",
         }
     }
 }
@@ -433,6 +527,11 @@ pub struct Attributes {
     /// positions (worse the further away), so he shades wrong, blows assignments,
     /// and throws into coverage he didn't see (§2). The genius layer.
     pub awareness: Fx,
+    /// Conditioning — how slowly the player burns stamina and how much he recovers
+    /// between rounds. A high-Endurance "engine" stays fresh and fades little over
+    /// a match; a low one drains fast and accumulates fatigue late (see
+    /// `advance_motion` drain and `reset_for_next_soul` recovery).
+    pub endurance: Fx,
 }
 
 impl Attributes {
@@ -450,6 +549,7 @@ impl Attributes {
             positioning: mid,
             pace: mid,
             awareness: mid,
+            endurance: mid,
         }
     }
 
@@ -468,6 +568,7 @@ impl Attributes {
             positioning: draw_attribute(rng),
             pace: draw_attribute(rng),
             awareness: draw_attribute(rng),
+            endurance: draw_attribute(rng),
         }
     }
 
@@ -485,6 +586,7 @@ impl Attributes {
             Attribute::Positioning => self.positioning,
             Attribute::Pace => self.pace,
             Attribute::Awareness => self.awareness,
+            Attribute::Endurance => self.endurance,
         }
     }
 }
@@ -502,38 +604,115 @@ fn draw_attribute(rng: &mut Rng) -> Fx {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InPossessionRole {
-    /// Tall/narrow column — balanced, carries the lane (wide = winger, central = B2B).
-    BoxToBox,
-    /// Wide/flat band — balanced carry vs pass, drifts laterally (the default).
-    #[default]
-    Roamer,
-    /// Compact — pass-first, forward.
-    Playmaker,
-    /// Compact, sits deep — safe recycle, low carry.
+    /// Long lane + extra width — the highest carry appetite, drives at space.
+    /// Sings with Pace (he exploits the room he opens). Was Box-to-box.
+    Runner,
+    /// Wide/flat band, stays back — safe recycle, pass-first. The deep
+    /// distributor; absorbs the old Roamer's shape with the old Outlet's
+    /// keep-it-simple tendency.
     Outlet,
+    /// Compact connector — pass-first, prioritizes staying *open* off the ball,
+    /// then releases quickly. The ball moves *through* him (a balanced default).
+    #[default]
+    Pivot,
+    /// Drives and hunts high-value passes, forward — not just a distributor; he
+    /// carries into danger and looks for the killer ball.
+    Playmaker,
     /// Finisher shell — shoots (Accuracy/Range + placement = the style).
     Finisher,
 }
 
 /// A player's **out-of-possession** casting (§14) — a fixed-shape footprint + a
-/// challenge tendency ([`DefenseBias`]).
+/// challenge tendency ([`DefenseBias`]). The challenge tendency is a point on two
+/// axes (see [`DefenseBias`]): on-ball **containment vs aggression** and off-ball
+/// **passing lanes vs driving lanes** ([`OffBallMode`]) — the zone-defense
+/// grammar borrowed from basketball help-side / soccer zonal marking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutOfPossessionRole {
-    /// Tiny symmetric zone — trigger-happy challenge.
-    Destroyer,
-    /// Forward-leaning zone — aggressive, pushes up into the buildup.
-    Presser,
-    /// Large area — patient/contain (needs Positioning + Awareness) — the default.
-    #[default]
-    Warden,
-    /// Wide/flat band — patient last line.
+    /// Wide/flat band, last line — *contains* on the ball, covers *driving lanes*
+    /// off it (deny penetration toward the goal he defends).
     Sweeper,
+    /// Compact man-marker — *contains* on the ball, covers *passing lanes* off it
+    /// (deny his man the pass). The man-to-man feel (the default).
+    #[default]
+    Marker,
+    /// Big aggressive circle — *attacks* the ball, sags into *driving lanes* off
+    /// it. The disruptor who collapses on the carrier.
+    Destroyer,
+    /// Lane-jumping ball-hawk — *attacks* on the ball, gambles *passing lanes* off
+    /// it (reads and jumps the pick).
+    Hawk,
     /// Compact, sits high — ~no challenge; positions by *offensive* value (the
     /// counter outlet), defending a man down for the break.
     Cheat,
-    /// Tall/narrow column — covers a vertical lane.
-    Tracker,
+}
+
+/// A player's derived on-field **position band** — the depth a role tends to
+/// occupy. Purely a *label* (no sim effect): a player's shown position is the
+/// pair (in-possession depth / out-of-possession depth), so a Runner who defends
+/// as a Sweeper reads "Middle / Defense" — a wingback (forward in attack, back in
+/// defense). Surfaced in scout / squad / box-score views.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Position {
+    Forward,
+    Middle,
+    Defense,
+}
+
+impl Position {
+    /// One-letter tag for compact tables (`F` / `M` / `D`).
+    pub fn short(self) -> &'static str {
+        match self {
+            Position::Forward => "F",
+            Position::Middle => "M",
+            Position::Defense => "D",
+        }
+    }
+
+    /// Full label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Position::Forward => "Forward",
+            Position::Middle => "Middle",
+            Position::Defense => "Defense",
+        }
+    }
+}
+
+impl InPossessionRole {
+    /// The depth band this in-possession role tends to occupy (derived label).
+    pub fn position(self) -> Position {
+        match self {
+            InPossessionRole::Finisher | InPossessionRole::Playmaker => Position::Forward,
+            InPossessionRole::Pivot | InPossessionRole::Runner => Position::Middle,
+            InPossessionRole::Outlet => Position::Defense,
+        }
+    }
+}
+
+impl OutOfPossessionRole {
+    /// The depth band this out-of-possession role tends to occupy (derived label).
+    pub fn position(self) -> Position {
+        match self {
+            OutOfPossessionRole::Cheat => Position::Forward,
+            OutOfPossessionRole::Hawk | OutOfPossessionRole::Destroyer => Position::Middle,
+            OutOfPossessionRole::Marker | OutOfPossessionRole::Sweeper => Position::Defense,
+        }
+    }
+}
+
+/// How an off-ball defender covers space — the second defensive axis (§ zone
+/// defense). Both modes reuse the same cover-shadow primitive, pointed at a
+/// different target, so the AI stays dumb-but-sound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OffBallMode {
+    /// Shadow the lanes from the carrier to his *receivers* — deny the pass
+    /// (the man-marking / interception read).
+    PassingLanes,
+    /// Sag into the lane from the carrier toward the goal he *attacks* — deny the
+    /// drive (basketball help-side, soccer deny-penetration).
+    DrivingLanes,
 }
 
 /// A role's footprint shape — an ellipse of legal hexes around the anchor, with
@@ -585,10 +764,10 @@ pub struct OnBallBias {
 /// change how a role plays, edit its row in [`SimConfig::default`].
 #[derive(Debug, Clone, Copy)]
 pub struct RoleBiases {
-    pub box_to_box: OnBallBias,
-    pub roamer: OnBallBias,
-    pub playmaker: OnBallBias,
+    pub runner: OnBallBias,
     pub outlet: OnBallBias,
+    pub pivot: OnBallBias,
+    pub playmaker: OnBallBias,
     pub finisher: OnBallBias,
 }
 
@@ -596,10 +775,10 @@ impl RoleBiases {
     /// The bias for a given in-possession role.
     pub fn for_role(&self, role: InPossessionRole) -> OnBallBias {
         match role {
-            InPossessionRole::BoxToBox => self.box_to_box,
-            InPossessionRole::Roamer => self.roamer,
-            InPossessionRole::Playmaker => self.playmaker,
+            InPossessionRole::Runner => self.runner,
             InPossessionRole::Outlet => self.outlet,
+            InPossessionRole::Pivot => self.pivot,
+            InPossessionRole::Playmaker => self.playmaker,
             InPossessionRole::Finisher => self.finisher,
         }
     }
@@ -607,16 +786,25 @@ impl RoleBiases {
 
 /// Per-[`OutOfPossessionRole`] weighting on defending — the challenge tendency
 /// **plus** the off-ball footprint shape. Like [`OnBallBias`], the whole
-/// defensive role-tuning surface.
+/// defensive role-tuning surface. The challenge tendency is two axes: **on-ball**
+/// (`containment_dist` + `lunge_min_prob` = contain vs attack the ball) and
+/// **off-ball** (`off_ball` = passing lanes vs driving lanes).
 #[derive(Debug, Clone, Copy)]
 pub struct DefenseBias {
     /// Scales how far the carrier must be before this defender breaks shape to
-    /// close down (Presser ↑ hounds from distance, Sweeper ↓ holds until close;
-    /// 0 = never breaks shape, like a Cheat).
+    /// close down (Hawk/Destroyer ↑ hound from distance, Sweeper ↓ holds until
+    /// close; 0 = never breaks shape, like a Cheat).
     pub contest_range_mult: Fx,
     /// A defender won't commit a lunge whose strip chance is below this — a
-    /// patient role *contains* (no whiff, no seam) rather than gambling.
+    /// *containing* role holds (no whiff, no seam) rather than gambling, while an
+    /// *aggressive* role (gate 0) attacks every chance.
     pub lunge_min_prob: Fx,
+    /// Goal-side standoff when contesting the carrier (the on-ball axis): an
+    /// *aggressive* role sits tight on the ball (~0), a *containing* role stands
+    /// off goal-side to wall off the drive without gambling.
+    pub containment_dist: Fx,
+    /// How this role covers space off the ball (the off-ball axis).
+    pub off_ball: OffBallMode,
     /// The off-ball footprint shape for this role.
     pub footprint: Footprint,
 }
@@ -624,24 +812,22 @@ pub struct DefenseBias {
 /// The tunable per-[`OutOfPossessionRole`] bias table (a [`SimConfig`] dial).
 #[derive(Debug, Clone, Copy)]
 pub struct DefenseBiases {
-    pub destroyer: DefenseBias,
-    pub presser: DefenseBias,
-    pub warden: DefenseBias,
     pub sweeper: DefenseBias,
+    pub marker: DefenseBias,
+    pub destroyer: DefenseBias,
+    pub hawk: DefenseBias,
     pub cheat: DefenseBias,
-    pub tracker: DefenseBias,
 }
 
 impl DefenseBiases {
     /// The bias for a given out-of-possession role.
     pub fn for_role(&self, role: OutOfPossessionRole) -> DefenseBias {
         match role {
-            OutOfPossessionRole::Destroyer => self.destroyer,
-            OutOfPossessionRole::Presser => self.presser,
-            OutOfPossessionRole::Warden => self.warden,
             OutOfPossessionRole::Sweeper => self.sweeper,
+            OutOfPossessionRole::Marker => self.marker,
+            OutOfPossessionRole::Destroyer => self.destroyer,
+            OutOfPossessionRole::Hawk => self.hawk,
             OutOfPossessionRole::Cheat => self.cheat,
-            OutOfPossessionRole::Tracker => self.tracker,
         }
     }
 }
@@ -702,9 +888,21 @@ pub enum Possession {
     /// Carried by the agent with this id.
     Held(u32),
     /// A pass in flight, homing toward the agent with this id. The outcome is
-    /// decided at release: `to` is the receiver (`intercepted` false) or the
-    /// intercepting defender (`intercepted` true).
-    InFlight { to: u32, intercepted: bool },
+    /// decided at release (see [`FlightOutcome`]): `to` is the receiver on a
+    /// completion, the defender on a pick or a deflection.
+    InFlight { to: u32, outcome: FlightOutcome },
+}
+
+/// How a pass in flight resolves when the soul reaches its target — decided at
+/// release, so the lane read isn't re-rolled mid-flight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlightOutcome {
+    /// Reaches the intended receiver, who gathers it.
+    Complete,
+    /// A defender cleanly picks it off (a clean turnover).
+    Intercepted,
+    /// A defender tips it loose — it drops into open play at the deflector's spot.
+    Deflected,
 }
 
 /// The soul (the ball): a position, and who holds it.

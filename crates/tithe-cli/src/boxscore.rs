@@ -49,8 +49,9 @@ pub fn run(args: &[String]) {
     for team in 0..2u8 {
         println!("\nteam {team}  {}", team_name(team));
         println!(
-            "  {:<8} {:<17} {:>2} {:>3} {:>5}  {:>7} {:>5}  {:>3}  {:>7} {:>5}  {:>4} {:>3}",
+            "  {:<8} {:>4} {:<17} {:>2} {:>3} {:>5}  {:>7} {:>5}  {:>3}  {:>7} {:>5}  {:>4} {:>3}",
             "name",
+            "pos",
             "role",
             "G",
             "Off",
@@ -69,9 +70,17 @@ pub fn run(args: &[String]) {
             }
             let p = &bx.players[i];
             let roles = format!("{}/{}", attack_label(*attack), defend_label(*defend));
+            // Derived position: (in-possession depth / out-of-possession depth),
+            // so a Runner who sweeps reads "M/D" — a wingback.
+            let pos = format!(
+                "{}/{}",
+                attack.position().short(),
+                defend.position().short()
+            );
             println!(
-                "  {:<8} {:<17} {:>2} {:>3} {:>5}  {:>3}/{:<3} {:>5}  {:>3}  {:>3}/{:<3} {:>5}  {:>4} {:>3}",
+                "  {:<8} {:>4} {:<17} {:>2} {:>3} {:>5}  {:>3}/{:<3} {:>5}  {:>3}  {:>3}/{:<3} {:>5}  {:>4} {:>3}",
                 name,
+                pos,
                 roles,
                 p.goals,
                 p.offerings,
@@ -89,8 +98,9 @@ pub fn run(args: &[String]) {
         }
         let total = team_total(&bx, &agents, team);
         println!(
-            "  {:<8} {:<17} {:>2} {:>3} {:>5}  {:>3}/{:<3} {:>5}  {:>3}  {:>3}/{:<3} {:>5}  {:>4} {:>3}",
+            "  {:<8} {:>4} {:<17} {:>2} {:>3} {:>5}  {:>3}/{:<3} {:>5}  {:>3}  {:>3}/{:<3} {:>5}  {:>4} {:>3}",
             "TOTAL",
+            "",
             "",
             total.goals,
             total.offerings,

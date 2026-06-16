@@ -23,7 +23,7 @@ use tithe_sim::{Attribute, PlayerLine, Rng};
 /// and consumed when the season is advanced. Counts are in [`Attribute`] order.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Usage {
-    counts: [u32; 9],
+    counts: [u32; 10],
 }
 
 impl Usage {
@@ -32,7 +32,7 @@ impl Usage {
     /// ceiling. Used when aging a generated player up, where there is no match
     /// history to bias by.
     pub fn uniform() -> Self {
-        Usage { counts: [1; 9] }
+        Usage { counts: [1; 10] }
     }
 
     /// Fold one match's box-score line into the running totals. The mapping ties
@@ -124,6 +124,7 @@ impl DevelopmentModel {
     pub fn fragility(attr: Attribute) -> u32 {
         match attr {
             Attribute::Pace => 100,       // the first thing to go
+            Attribute::Endurance => 85,   // the engine fades early too (conditioning)
             Attribute::Stripping => 70,   // athletic defending
             Attribute::Contesting => 70,  // athletic defending
             Attribute::Handling => 50,    // half touch, half athleticism
@@ -215,7 +216,7 @@ mod tests {
     #[test]
     fn the_young_grow_toward_their_ceiling() {
         let model = DevelopmentModel::default();
-        let potential = Ratings::from_canonical([80; 9]);
+        let potential = Ratings::from_canonical([80; 10]);
         let mut p = Player {
             id: PlayerId(0),
             name: "Prospect".into(),
@@ -243,7 +244,7 @@ mod tests {
     #[test]
     fn the_old_decline_shape_first() {
         let model = DevelopmentModel::default();
-        let level = Ratings::from_canonical([80; 9]);
+        let level = Ratings::from_canonical([80; 10]);
         let mut p = Player {
             id: PlayerId(0),
             name: "Veteran".into(),
@@ -271,13 +272,13 @@ mod tests {
     #[test]
     fn the_peak_is_a_plateau() {
         let model = DevelopmentModel::default();
-        let level = Ratings::from_canonical([70; 9]);
+        let level = Ratings::from_canonical([70; 10]);
         let mut p = Player {
             id: PlayerId(0),
             name: "Peak".into(),
             age: model.peak_age,
             ratings: level.clone(),
-            potential: Ratings::from_canonical([90; 9]), // headroom, but no growth at peak
+            potential: Ratings::from_canonical([90; 10]), // headroom, but no growth at peak
             development_risk: 100,
             season_usage: Usage::default(),
             appearances: 0,
@@ -292,7 +293,7 @@ mod tests {
     #[test]
     fn zero_risk_is_deterministic_projection() {
         let model = DevelopmentModel::default();
-        let potential = Ratings::from_canonical([75; 9]);
+        let potential = Ratings::from_canonical([75; 10]);
         let make = || Player {
             id: PlayerId(0),
             name: "Steady".into(),
@@ -317,7 +318,7 @@ mod tests {
     #[test]
     fn usage_biases_growth_toward_what_is_used() {
         let model = DevelopmentModel::default();
-        let potential = Ratings::from_canonical([90; 9]);
+        let potential = Ratings::from_canonical([90; 10]);
         let make = || Player {
             id: PlayerId(0),
             name: "Shooter".into(),

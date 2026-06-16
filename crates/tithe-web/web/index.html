@@ -105,8 +105,8 @@
   const ARENA = { half_x: 50, half_y: 30, goal_x: 45 };
   const FLASH_TICKS = 18; // how long an event ring lingers (ticks)
   const teamColor = t => (t === 0 ? '#e8643c' : '#4c9be8');
-  const roleAbbr = r => ({ box_to_box:'B2B', roamer:'ROAM', playmaker:'PLY', outlet:'OUT', finisher:'FIN',
-                           destroyer:'DES', presser:'PRS', warden:'WAR', sweeper:'SWP', cheat:'CHT', tracker:'TRK' }[r] || r);
+  const roleAbbr = r => ({ runner:'RUN', outlet:'OUT', pivot:'PIV', playmaker:'PLY', finisher:'FIN',
+                           sweeper:'SWP', marker:'MRK', destroyer:'DES', hawk:'HWK', cheat:'CHT' }[r] || r);
 
   // A field<->screen mapping for a canvas (shared by the boards and the viewer).
   function field(canvas) {
@@ -245,7 +245,7 @@
         name: team.name,
         players: team.players.map((p, i) => ({
           name: p.name, attackRole: p.attack_role, defendRole: p.defend_role,
-          acc: p.accuracy, rng: p.range, hand: p.handling, strip: p.stripping, cont: p.contesting, pass: p.passing, pos: p.positioning, pace: p.pace, awr: p.awareness,
+          acc: p.accuracy, rng: p.range, hand: p.handling, strip: p.stripping, cont: p.contesting, pass: p.passing, pos: p.positioning, pace: p.pace, awr: p.awareness, end: p.endurance,
           attack: toAbs(A[i]), defend: toAbs(D[i]),
         })),
       };
@@ -289,11 +289,11 @@
   function drawAll() { boards.forEach(drawBoard); }
 
   // ---- editable roster -------------------------------------------------------
-  const ATTACK_ROLES = [['box_to_box','Box-to-box'],['roamer','Roamer'],['playmaker','Playmaker'],
-                        ['outlet','Outlet'],['finisher','Finisher']];
-  const DEFEND_ROLES = [['destroyer','Destroyer'],['presser','Presser'],['warden','Warden'],
-                        ['sweeper','Sweeper'],['cheat','Cheat'],['tracker','Tracker']];
-  const ATTRS = [['acc','A'],['rng','R'],['hand','H'],['strip','S'],['cont','C'],['pass','P'],['pos','Po'],['pace','Pc'],['awr','Aw']];
+  const ATTACK_ROLES = [['runner','Runner'],['outlet','Outlet'],['pivot','Pivot'],
+                        ['playmaker','Playmaker'],['finisher','Finisher']];
+  const DEFEND_ROLES = [['sweeper','Sweeper'],['marker','Marker'],['destroyer','Destroyer'],
+                        ['hawk','Hawk'],['cheat','Cheat']];
+  const ATTRS = [['acc','A'],['rng','R'],['hand','H'],['strip','S'],['cont','C'],['pass','P'],['pos','Po'],['pace','Pc'],['awr','Aw'],['end','En']];
 
   function selectHtml(field, options, current, t, i) {
     const opts = options.map(([v, label]) =>
@@ -410,7 +410,7 @@
         defend_formation: dn,
         players: team.players.map(p => ({
           name: p.name, attack_role: p.attackRole, defend_role: p.defendRole,
-          accuracy: p.acc, range: p.rng, handling: p.hand, stripping: p.strip, contesting: p.cont, passing: p.pass, positioning: p.pos, pace: p.pace, awareness: p.awr,
+          accuracy: p.acc, range: p.rng, handling: p.hand, stripping: p.strip, contesting: p.cont, passing: p.pass, positioning: p.pos, pace: p.pace, awareness: p.awr, endurance: p.end,
         })),
       };
     });
@@ -565,8 +565,8 @@
 
   // ---- hover a player → roles + attributes -----------------------------------
   const ptip = document.getElementById('ptip');
-  const ROLE_LABEL = { box_to_box:'Box-to-box', roamer:'Roamer', playmaker:'Playmaker', outlet:'Outlet', finisher:'Finisher',
-                       destroyer:'Destroyer', presser:'Presser', warden:'Warden', sweeper:'Sweeper', cheat:'Cheat', tracker:'Tracker' };
+  const ROLE_LABEL = { runner:'Runner', outlet:'Outlet', pivot:'Pivot', playmaker:'Playmaker', finisher:'Finisher',
+                       sweeper:'Sweeper', marker:'Marker', destroyer:'Destroyer', hawk:'Hawk', cheat:'Cheat' };
   function tipHtml(m) {
     const a = m.attrs;
     const lbl = r => ROLE_LABEL[r] || r;
@@ -574,7 +574,7 @@
       `<div class="hint">${lbl(m.attack_role)} / ${lbl(m.defend_role)}</div>` +
       `<div class="tip-attrs">Acc ${a.acc}&ensp;Rng ${a.rng}&ensp;Han ${a.han}</div>` +
       `<div class="tip-attrs">Str ${a.str}&ensp;Con ${a.con}&ensp;Pas ${a.pas}</div>` +
-      `<div class="tip-attrs">Pos ${a.pos}&ensp;Pace ${a.pace}&ensp;Awr ${a.awr}</div>`;
+      `<div class="tip-attrs">Pos ${a.pos}&ensp;Pace ${a.pace}&ensp;Awr ${a.awr}&ensp;End ${a.end}</div>`;
   }
   vc.addEventListener('mousemove', e => {
     if (!MATCH) { ptip.style.display = 'none'; return; }

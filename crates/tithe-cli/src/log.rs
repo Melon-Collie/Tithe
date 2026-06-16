@@ -18,12 +18,12 @@ pub fn run(args: &[String]) {
     let names: Vec<String> = sim.agents().iter().map(|a| a.name.clone()).collect();
 
     println!("== Tithe match log (seed {seed}) ==");
-    println!("roster (attack/defend role, Acc/Rng/Hand/Strip/Cont/Pass/Pos/Pace/Awr 0–99):");
+    println!("roster (attack/defend role, Acc/Rng/Hand/Strip/Cont/Pass/Pos/Pace/Awr/End 0–99):");
     for a in sim.agents() {
         let at = &a.attributes;
         let pct = |f: tithe_sim::Fx| (f * tithe_sim::Fx::from_num(100)).to_num::<u32>();
         println!(
-            "  {:<8} team{} {:<9}/{:<8} A{:>2} R{:>2} H{:>2} S{:>2} C{:>2} P{:>2} Po{:>2} Pc{:>2} Aw{:>2}",
+            "  {:<8} team{} {:<9}/{:<8} A{:>2} R{:>2} H{:>2} S{:>2} C{:>2} P{:>2} Po{:>2} Pc{:>2} Aw{:>2} En{:>2}",
             a.name,
             a.team,
             attack_label(a.attack_role),
@@ -37,6 +37,7 @@ pub fn run(args: &[String]) {
             pct(at.positioning),
             pct(at.pace),
             pct(at.awareness),
+            pct(at.endurance),
         );
     }
     println!();
@@ -64,10 +65,10 @@ fn name_of(names: &[String], id: u32) -> String {
 /// A short human label for an in-possession role.
 pub(crate) fn attack_label(role: InPossessionRole) -> &'static str {
     match role {
-        InPossessionRole::BoxToBox => "box2box",
-        InPossessionRole::Roamer => "roamer",
-        InPossessionRole::Playmaker => "playmaker",
+        InPossessionRole::Runner => "runner",
         InPossessionRole::Outlet => "outlet",
+        InPossessionRole::Pivot => "pivot",
+        InPossessionRole::Playmaker => "playmaker",
         InPossessionRole::Finisher => "finisher",
     }
 }
@@ -75,12 +76,11 @@ pub(crate) fn attack_label(role: InPossessionRole) -> &'static str {
 /// A short human label for an out-of-possession role.
 pub(crate) fn defend_label(role: OutOfPossessionRole) -> &'static str {
     match role {
-        OutOfPossessionRole::Destroyer => "destroyer",
-        OutOfPossessionRole::Presser => "presser",
-        OutOfPossessionRole::Warden => "warden",
         OutOfPossessionRole::Sweeper => "sweeper",
+        OutOfPossessionRole::Marker => "marker",
+        OutOfPossessionRole::Destroyer => "destroyer",
+        OutOfPossessionRole::Hawk => "hawk",
         OutOfPossessionRole::Cheat => "cheat",
-        OutOfPossessionRole::Tracker => "tracker",
     }
 }
 
@@ -94,13 +94,27 @@ fn describe(event: &Event, names: &[String]) -> Option<String> {
             Some(format!("{} → {} ({chance}%)", who(*from), who(*to)))
         }
         Event::PassIntercepted { by } => Some(format!("    ...intercepted by {}!", who(*by))),
+        Event::PassDeflected { by } => Some(format!("    ...tipped loose by {}!", who(*by))),
         Event::StripAttempt {
             defender,
             carrier,
             chance,
             success,
+            clean,
         } => Some(if *success {
-            format!("{} STRIPS {} ({chance}%)", who(*defender), who(*carrier))
+            if *clean {
+                format!(
+                    "{} STRIPS {} clean ({chance}%)",
+                    who(*defender),
+                    who(*carrier)
+                )
+            } else {
+                format!(
+                    "{} pokes it loose off {} ({chance}%)",
+                    who(*defender),
+                    who(*carrier)
+                )
+            }
         } else {
             format!(
                 "{} fails to challenge {} ({chance}%)",
@@ -114,11 +128,18 @@ fn describe(event: &Event, names: &[String]) -> Option<String> {
         Event::OfferingResolved {
             carrier,
             chance,
+            charge,
             scored,
         } => Some(if *scored {
-            format!("{} offers ({chance}%) — GOAL", who(*carrier))
+            format!(
+                "{} offers ({chance}%, {charge}% charged) — GOAL",
+                who(*carrier)
+            )
         } else {
-            format!("{} offers ({chance}%) — rejected, rebound", who(*carrier))
+            format!(
+                "{} offers ({chance}%, {charge}% charged) — rejected, rebound",
+                who(*carrier)
+            )
         }),
         Event::Scored { team, score } => Some(format!(
             "  ── team {team} scores — {}–{} ──",

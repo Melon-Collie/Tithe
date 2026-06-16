@@ -292,7 +292,7 @@ fn golden_default_match_hash() {
         let poss: u64 = match soul.possession {
             Possession::Loose => 1,
             Possession::Held(id) => 2 << 32 | id as u64,
-            Possession::InFlight { to, intercepted } => (3 + intercepted as u64) << 32 | to as u64,
+            Possession::InFlight { to, outcome } => (3 + outcome as u64) << 32 | to as u64,
         };
         h = fnv1a(&poss.to_le_bytes(), h);
         for a in sim.agents() {
@@ -312,7 +312,7 @@ fn golden_default_match_hash() {
     // touching it. An EXPECTED change (you altered sim behavior on purpose) means
     // re-pin it in the same commit, after confirming the diff is the intended one.
     assert_eq!(
-        h, 0x2001_3816_ae71_e2c5,
+        h, 0xbaf8_fba0_5bdd_f116,
         "golden match hash changed — actual = {h:#018x}"
     );
 }

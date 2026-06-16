@@ -12,7 +12,7 @@
 
 use tithe_sim::{BoxScore, Event, MatchSetup, PlayerLine, PlayerSetup, Possession, Simulation};
 
-const ATTRS: [&str; 9] = [
+const ATTRS: [&str; 10] = [
     "accuracy",
     "range",
     "handling",
@@ -22,6 +22,7 @@ const ATTRS: [&str; 9] = [
     "positioning",
     "pace",
     "awareness",
+    "endurance",
 ];
 
 pub fn run(args: &[String]) {
@@ -180,6 +181,7 @@ fn set_attr(p: &mut PlayerSetup, attr: &str, v: u8) {
         "positioning" => p.positioning = v,
         "pace" => p.pace = v,
         "awareness" => p.awareness = v,
+        "endurance" => p.endurance = v,
         _ => {}
     }
 }

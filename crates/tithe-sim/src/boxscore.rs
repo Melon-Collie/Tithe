@@ -82,6 +82,16 @@ impl BoxScore {
                         }
                     }
                 }
+                Event::PassDeflected { .. } => {
+                    // A tipped pass dropped loose — it never reached a teammate, so
+                    // undo the optimistic completion (the scramble recovery is
+                    // credited separately via `SoulClaimed`).
+                    if let Some(from) = last_pass_from.take() {
+                        if let Some(p) = players.get_mut(from as usize) {
+                            p.passes_completed = p.passes_completed.saturating_sub(1);
+                        }
+                    }
+                }
                 Event::StripAttempt {
                     defender,
                     carrier,
@@ -153,21 +163,25 @@ mod tests {
                 carrier: 3,
                 chance: 60,
                 success: true,
+                clean: true,
             },
             Event::StripAttempt {
                 defender: 4,
                 carrier: 9,
                 chance: 40,
                 success: false,
+                clean: false,
             },
             Event::OfferingResolved {
                 carrier: 5,
                 chance: 70,
+                charge: 80,
                 scored: true,
             },
             Event::OfferingResolved {
                 carrier: 5,
                 chance: 30,
+                charge: 0,
                 scored: false,
             },
         ];
@@ -201,6 +215,7 @@ mod tests {
         let a_events = vec![Event::OfferingResolved {
             carrier: 0,
             chance: 50,
+            charge: 60,
             scored: true,
         }];
         let mut total = BoxScore::from_events(&a_events, 2);

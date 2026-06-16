@@ -94,6 +94,7 @@ pub struct PlayerSetup {
     pub positioning: u8,
     pub pace: u8,
     pub awareness: u8,
+    pub endurance: u8,
 }
 
 impl PlayerSetup {
@@ -120,6 +121,7 @@ impl PlayerSetup {
             positioning: one("positioning", self.positioning)?,
             pace: one("pace", self.pace)?,
             awareness: one("awareness", self.awareness)?,
+            endurance: one("endurance", self.endurance)?,
         })
     }
 
@@ -136,6 +138,7 @@ impl PlayerSetup {
             Attribute::Positioning => self.positioning,
             Attribute::Pace => self.pace,
             Attribute::Awareness => self.awareness,
+            Attribute::Endurance => self.endurance,
         }
     }
 }
@@ -339,43 +342,43 @@ impl MatchSetup {
                             "Vale",
                             IP::Outlet,
                             OP::Sweeper,
-                            [20, 20, 35, 70, 65, 45, 75, 40, 60],
+                            [20, 20, 35, 70, 65, 45, 75, 40, 60, 55],
                         ),
                         (
                             "Crane",
-                            IP::Roamer,
-                            OP::Warden,
-                            [45, 45, 50, 50, 50, 55, 50, 70, 50],
+                            IP::Runner,
+                            OP::Marker,
+                            [45, 45, 50, 50, 50, 55, 50, 70, 50, 80],
                         ),
                         (
                             "Ash",
-                            IP::Playmaker,
-                            OP::Tracker,
-                            [40, 35, 65, 35, 55, 80, 60, 50, 75],
+                            IP::Pivot,
+                            OP::Hawk,
+                            [40, 35, 65, 35, 55, 80, 60, 50, 75, 60],
                         ),
                         (
                             "Rook",
-                            IP::BoxToBox,
-                            OP::Warden,
-                            [50, 45, 50, 55, 50, 50, 50, 55, 50],
+                            IP::Playmaker,
+                            OP::Marker,
+                            [50, 45, 50, 55, 50, 50, 50, 55, 50, 55],
                         ),
                         (
                             "Pyre",
-                            IP::Roamer,
-                            OP::Presser,
-                            [50, 35, 40, 65, 60, 35, 45, 75, 45],
+                            IP::Runner,
+                            OP::Destroyer,
+                            [50, 35, 40, 65, 60, 35, 45, 75, 45, 85],
                         ),
                         (
                             "Sear",
                             IP::Finisher,
                             OP::Cheat,
-                            [85, 30, 55, 30, 40, 50, 55, 60, 70],
+                            [85, 30, 55, 30, 40, 50, 55, 60, 70, 40],
                         ),
                         (
                             "Knell",
-                            IP::Roamer,
+                            IP::Pivot,
                             OP::Destroyer,
-                            [45, 40, 40, 60, 65, 40, 40, 65, 40],
+                            [45, 40, 40, 60, 65, 40, 40, 65, 40, 65],
                         ),
                     ],
                 ),
@@ -386,43 +389,43 @@ impl MatchSetup {
                             "Holt",
                             IP::Outlet,
                             OP::Sweeper,
-                            [25, 25, 35, 75, 60, 40, 80, 40, 65],
+                            [25, 25, 35, 75, 60, 40, 80, 40, 65, 55],
                         ),
                         (
                             "Bram",
-                            IP::Roamer,
-                            OP::Warden,
-                            [50, 45, 50, 50, 50, 55, 45, 70, 50],
+                            IP::Runner,
+                            OP::Marker,
+                            [50, 45, 50, 50, 50, 55, 45, 70, 50, 80],
                         ),
                         (
                             "Fen",
-                            IP::Playmaker,
-                            OP::Tracker,
-                            [45, 40, 70, 40, 50, 75, 60, 50, 80],
+                            IP::Pivot,
+                            OP::Hawk,
+                            [45, 40, 70, 40, 50, 75, 60, 50, 80, 60],
                         ),
                         (
                             "Cole",
-                            IP::BoxToBox,
-                            OP::Warden,
-                            [50, 50, 50, 50, 55, 50, 50, 50, 50],
+                            IP::Playmaker,
+                            OP::Marker,
+                            [50, 50, 50, 50, 55, 50, 50, 50, 50, 50],
                         ),
                         (
                             "Dane",
-                            IP::Roamer,
-                            OP::Presser,
-                            [50, 35, 40, 60, 65, 35, 45, 75, 45],
+                            IP::Runner,
+                            OP::Destroyer,
+                            [50, 35, 40, 60, 65, 35, 45, 75, 45, 85],
                         ),
                         (
                             "Gar",
                             IP::Finisher,
                             OP::Cheat,
-                            [55, 85, 55, 35, 45, 55, 35, 45, 40],
+                            [55, 85, 55, 35, 45, 55, 35, 45, 40, 35],
                         ),
                         (
                             "Ward",
-                            IP::Roamer,
+                            IP::Pivot,
                             OP::Destroyer,
-                            [45, 40, 40, 65, 60, 45, 40, 65, 40],
+                            [45, 40, 40, 65, 60, 45, 40, 65, 40, 65],
                         ),
                     ],
                 ),
@@ -433,11 +436,11 @@ impl MatchSetup {
 
 /// Build an example team from compact `(name, attack_role, defend_role,
 /// [accuracy, range, handling, stripping, contesting, passing, positioning,
-/// pace, awareness])` tuples — keeps [`MatchSetup::default_match`] readable.
-/// Both teams field the shared `high-push` / `low-block` phase shapes.
+/// pace, awareness, endurance])` tuples — keeps [`MatchSetup::default_match`]
+/// readable. Both teams field the shared `high-push` / `low-block` phase shapes.
 fn example_team(
     name: &str,
-    players: &[(&str, InPossessionRole, OutOfPossessionRole, [u8; 9])],
+    players: &[(&str, InPossessionRole, OutOfPossessionRole, [u8; 10])],
 ) -> TeamSetup {
     TeamSetup {
         name: name.to_string(),
@@ -450,7 +453,7 @@ fn example_team(
                     pname,
                     attack_role,
                     defend_role,
-                    [accuracy, range, handling, stripping, contesting, passing, positioning, pace, awareness],
+                    [accuracy, range, handling, stripping, contesting, passing, positioning, pace, awareness, endurance],
                 )| {
                     PlayerSetup {
                         name: (*pname).to_string(),
@@ -465,6 +468,7 @@ fn example_team(
                         positioning: *positioning,
                         pace: *pace,
                         awareness: *awareness,
+                        endurance: *endurance,
                     }
                 },
             )
@@ -488,7 +492,7 @@ mod tests {
         for (i, a) in Attribute::ALL.iter().enumerate() {
             assert_eq!(*a as usize, i, "{a:?} is not at its canonical index");
         }
-        // Encode each attribute's index as its percentile (index 0..8 ≤ 100).
+        // Encode each attribute's index as its percentile (index 0..9 ≤ 100).
         let setup = PlayerSetup {
             name: "probe".into(),
             attack_role: InPossessionRole::default(),
@@ -502,6 +506,7 @@ mod tests {
             positioning: Attribute::Positioning as u8,
             pace: Attribute::Pace as u8,
             awareness: Attribute::Awareness as u8,
+            endurance: Attribute::Endurance as u8,
         };
         let attrs = setup.to_attributes().expect("in range");
         for a in Attribute::ALL {

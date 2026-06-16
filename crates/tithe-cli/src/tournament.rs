@@ -16,7 +16,7 @@ use tithe_sim::{InPossessionRole, MatchSetup, PlayerSetup, Simulation};
 struct Archetype {
     name: &'static str,
     short: &'static str,
-    attrs: [u8; 9],
+    attrs: [u8; 10],
 }
 
 // Attribute indices into the profile.
@@ -29,11 +29,12 @@ const PAS: usize = 5;
 const POS: usize = 6;
 const PACE: usize = 7;
 const AWR: usize = 8;
+const END: usize = 9;
 
 /// Build a profile: `primaries` set to `hi`, the rest to `lo`. Chosen so the sum
 /// is 450 for both 2-primary (2·85 + 7·40) and 3-primary (3·74 + 6·38) builds.
-fn profile(primaries: &[usize], hi: u8, lo: u8) -> [u8; 9] {
-    let mut a = [lo; 9];
+fn profile(primaries: &[usize], hi: u8, lo: u8) -> [u8; 10] {
+    let mut a = [lo; 10];
     for &i in primaries {
         a[i] = hi;
     }
@@ -65,7 +66,7 @@ fn archetypes() -> Vec<Archetype> {
         Archetype {
             name: "Balanced (flat 50)",
             short: "Bal",
-            attrs: [50; 9],
+            attrs: [50; 10],
         },
     ]
 }
@@ -98,7 +99,7 @@ fn build_setup(a: &Archetype, b: &Archetype, forward_finisher: bool) -> MatchSet
     setup
 }
 
-fn set_attrs(p: &mut PlayerSetup, a: &[u8; 9]) {
+fn set_attrs(p: &mut PlayerSetup, a: &[u8; 10]) {
     p.accuracy = a[ACC];
     p.range = a[RNG];
     p.handling = a[HAN];
@@ -108,6 +109,7 @@ fn set_attrs(p: &mut PlayerSetup, a: &[u8; 9]) {
     p.positioning = a[POS];
     p.pace = a[PACE];
     p.awareness = a[AWR];
+    p.endurance = a[END];
 }
 
 /// Play `matches` games of `a` (team 0) vs `b` (team 1) from `seed0`, returning

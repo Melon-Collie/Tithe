@@ -514,6 +514,7 @@ impl Career {
                     positioning: r.positioning,
                     pace: r.pace,
                     awareness: r.awareness,
+                    endurance: r.endurance,
                 }
             })
             .collect();
@@ -640,7 +641,7 @@ mod tests {
         let sniper = NewPlayer {
             name: "Quill".to_string(),
             age: 24,
-            ratings: Ratings::from_canonical([90, 80, 50, 30, 40, 50, 55, 60, 70]),
+            ratings: Ratings::from_canonical([90, 80, 50, 30, 40, 50, 55, 60, 70, 55]),
         };
         let idx = career.add_authored_club(
             "Authored",
@@ -650,7 +651,7 @@ mod tests {
                 .chain((0..6).map(|i| NewPlayer {
                     name: format!("Filler{i}"),
                     age: 25,
-                    ratings: Ratings::from_canonical([50; 9]),
+                    ratings: Ratings::from_canonical([50; 10]),
                 }))
                 .collect(),
         );

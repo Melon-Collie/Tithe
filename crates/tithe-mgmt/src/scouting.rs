@@ -53,8 +53,8 @@ pub struct ScoutReport {
     /// His scouted volatility (`0..=100`) — the "motor flag": a high value means
     /// even a well-scouted ceiling stays a wide bet (boom or bust).
     pub volatility: u8,
-    current: [Band; 9],
-    ceiling: [Band; 9],
+    current: [Band; 10],
+    ceiling: [Band; 10],
 }
 
 impl ScoutReport {
@@ -188,8 +188,8 @@ mod tests {
             id: PlayerId(3),
             name: "Probe".into(),
             age: 22,
-            ratings: Ratings::from_canonical([60; 9]),
-            potential: Ratings::from_canonical([80; 9]),
+            ratings: Ratings::from_canonical([60; 10]),
+            potential: Ratings::from_canonical([80; 10]),
             development_risk: risk,
             season_usage: Usage::default(),
             appearances,
