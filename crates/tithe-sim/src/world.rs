@@ -170,6 +170,16 @@ pub struct SimConfig {
     /// ×Endurance). A high-Endurance player recovers ~fully each round; a low one
     /// fades. Recovery is capped at full (1.0).
     pub recovery_gain: Fx,
+    /// How much faster a **benched** agent recovers between rounds than an
+    /// on-field one (×the normal recovery). Resting on the bench is the point of
+    /// carrying a deeper squad.
+    pub bench_recovery_mult: Fx,
+    /// Auto-rotation: a tired starter is only considered for a sub once his
+    /// stamina drops to or below this.
+    pub sub_tired_threshold: Fx,
+    /// Auto-rotation: the freshest bench player must be at least this much fresher
+    /// than the tired starter to actually rotate on (so a sub is worth making).
+    pub sub_stamina_gap: Fx,
     /// Speed multiplier at Pace 0 and Pace 1 — a player's top speed is
     /// interpolated between these (Pace 0.5 ≈ the average 1.0).
     pub pace_floor: Fx,
@@ -320,10 +330,13 @@ impl Default for SimConfig {
             endurance_drain_floor: Fx::from_num(5) / Fx::from_num(10), // End 1 ⇒ ½ drain
             recovery_base: Fx::from_num(3) / Fx::from_num(10), // End 0 recovers +0.30/round (< typical drain ~0.46)
             recovery_gain: Fx::from_num(6) / Fx::from_num(10), // End 1 recovers +0.90/round (≈ full)
-            pace_floor: Fx::from_num(75) / Fx::from_num(100),  // 0.75 (Pace 0)
-            pace_ceil: Fx::from_num(125) / Fx::from_num(100),  // 1.25 (Pace 1)
-            footprint_edge_softness: Fx::from_num(3),          // firm but soft at the edge
-            footprint_edge_max: Fx::from_num(4),               // never stray past 2× the radius
+            bench_recovery_mult: Fx::from_num(2), // a benched man recovers twice as fast
+            sub_tired_threshold: Fx::from_num(65) / Fx::from_num(100), // consider subbing below 0.65
+            sub_stamina_gap: Fx::from_num(2) / Fx::from_num(10), // need +0.20 freshness to rotate
+            pace_floor: Fx::from_num(75) / Fx::from_num(100),    // 0.75 (Pace 0)
+            pace_ceil: Fx::from_num(125) / Fx::from_num(100),    // 1.25 (Pace 1)
+            footprint_edge_softness: Fx::from_num(3),            // firm but soft at the edge
+            footprint_edge_max: Fx::from_num(4),                 // never stray past 2× the radius
             carry_tether_floor: Fx::from_num(6) / Fx::from_num(10), // 0.6 — reluctance, not refusal
             positioning_ball_pull: Fx::from_num(8) / Fx::from_num(10), // 0.8 pull at Positioning 0
             positioning_spacing: Fx::from_num(2) / Fx::from_num(10), // 0.2 — A/B off vs on
@@ -858,6 +871,12 @@ pub struct Agent {
     pub stagger: u32,
     pub stamina: Fx,
     pub attributes: Attributes,
+    /// Whether the agent is currently on the field (vs. waiting on the bench). A
+    /// benched agent doesn't move, act, perceive, or get perceived; he recovers
+    /// stamina and can be rotated on at a soul boundary. A no-bench match has
+    /// every agent on the field, so this never gates anything (and behaviour —
+    /// the golden hash — is unchanged).
+    pub on_field: bool,
 }
 
 impl Agent {
@@ -874,9 +893,11 @@ impl Agent {
 }
 
 impl Agent {
-    /// Whether the agent can move and act this tick (not staggered).
+    /// Whether the agent can move and act this tick: on the field and not
+    /// staggered. (Benched agents are off the field; staggered agents are on it
+    /// but briefly frozen.)
     pub fn is_active(&self) -> bool {
-        self.stagger == 0
+        self.on_field && self.stagger == 0
     }
 }
 
@@ -977,5 +998,6 @@ fn push_agent(agents: &mut Vec<Agent>, team: u8, anchor: Vec2, rng: &mut Rng) {
         stagger: 0,
         stamina: Fx::from_num(1),
         attributes: Attributes::random(rng),
+        on_field: true, // the default roster has no bench
     });
 }

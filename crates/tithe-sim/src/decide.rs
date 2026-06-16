@@ -318,6 +318,7 @@ mod tests {
             stagger: 0,
             stamina: Fx::from_num(1),
             attributes: Attributes::uniform(),
+            on_field: true,
         }
     }
 
