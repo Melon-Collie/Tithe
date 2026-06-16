@@ -251,6 +251,9 @@ impl Simulation {
         self.advance_motion();
         self.apply_separation();
         for agent in &self.agents {
+            if !agent.on_field {
+                continue; // benched agents have no field position to render
+            }
             events.push(Event::AgentMoved {
                 agent: agent.id,
                 pos: agent.pos,
@@ -281,9 +284,14 @@ impl Simulation {
         let real_pos: Vec<Vec2> = self.agents.iter().map(|a| a.pos).collect();
         let teams: Vec<u8> = self.agents.iter().map(|a| a.team).collect();
         let active: Vec<bool> = self.agents.iter().map(|a| a.is_active()).collect();
+        let on_field: Vec<bool> = self.agents.iter().map(|a| a.on_field).collect();
         let n = self.agents.len();
 
         for i in 0..n {
+            // Benched agents don't decide, move, or get perceived this window.
+            if !on_field[i] {
+                continue;
+            }
             // Commit this window's phase: attacking shape if my team holds the
             // soul, defending shape otherwise. The anchor flips here on the slow
             // clock, so the team morphs between shapes at the boundary.
@@ -318,12 +326,13 @@ impl Simulation {
                 ..c
             });
             let team = teams[i] as usize;
+            // Only on-field players are seen (a benched man isn't on the pitch).
             let p_allies: Vec<Vec2> = (0..n)
-                .filter(|&j| teams[j] as usize == team)
+                .filter(|&j| on_field[j] && teams[j] as usize == team)
                 .map(|j| perceived[j])
                 .collect();
             let p_enemies: Vec<Vec2> = (0..n)
-                .filter(|&j| teams[j] as usize != team)
+                .filter(|&j| on_field[j] && teams[j] as usize != team)
                 .map(|j| perceived[j])
                 .collect();
 
@@ -501,6 +510,9 @@ impl Simulation {
         let zero = Fx::from_num(0);
 
         for i in 0..self.agents.len() {
+            if !self.agents[i].on_field {
+                continue; // benched: no motion or drain (he recovers at the beat)
+            }
             if self.agents[i].stagger > 0 {
                 self.agents[i].stagger -= 1;
             } else {
@@ -534,8 +546,11 @@ impl Simulation {
             .map(|i| {
                 let me = &self.agents[i];
                 let mut push = Vec2::default();
+                if !me.on_field {
+                    return push; // benched agents don't crowd the field
+                }
                 for (j, other) in self.agents.iter().enumerate() {
-                    if i == j {
+                    if i == j || !other.on_field {
                         continue;
                     }
                     let delta = me.pos - other.pos;
@@ -570,7 +585,9 @@ impl Simulation {
         let pickup_radius = self.config.pickup_radius;
         let mut reached: Vec<u32> = Vec::new();
         for agent in &self.agents {
-            if agent.pos.distance_to(self.soul.pos) <= pickup_radius {
+            // Benched agents (parked off-field, near origin) can't claim — without
+            // this they'd contest the centre faceoff from the bench.
+            if agent.on_field && agent.pos.distance_to(self.soul.pos) <= pickup_radius {
                 reached.push(agent.id);
             }
         }
@@ -1148,6 +1165,7 @@ impl Simulation {
             }
             self.reset_for_next_soul();
             events.push(Event::NewSoul);
+            self.run_substitutions(events);
         } else {
             // The fire rejects it — a clean turnover to the defending side (the
             // nearest defender gathers it, the same model strips use), not a
@@ -1184,17 +1202,78 @@ impl Simulation {
     fn reset_for_next_soul(&mut self) {
         self.soul = Soul::loose_at(Vec2::default());
         self.offering = None;
+        let one = Fx::from_num(1);
         for agent in self.agents.iter_mut() {
-            agent.apply_phase(false); // loose soul → defending shape
-            agent.pos = agent.anchor;
-            agent.target = agent.anchor;
             agent.stagger = 0;
             // Partial, Endurance-scaled recovery (replaces the old full reset), so
             // fatigue accumulates across a match and a low-Endurance worker fades
             // late while an engine stays fresh. Capped at full.
-            let recovery =
+            let mut recovery =
                 self.config.recovery_base + self.config.recovery_gain * agent.attributes.endurance;
-            agent.stamina = (agent.stamina + recovery).min(Fx::from_num(1));
+            if agent.on_field {
+                agent.apply_phase(false); // loose soul → defending shape
+                agent.pos = agent.anchor;
+                agent.target = agent.anchor;
+            } else {
+                // Resting recovers faster — the reward for carrying a bench.
+                recovery *= self.config.bench_recovery_mult;
+            }
+            agent.stamina = (agent.stamina + recovery).min(one);
+        }
+    }
+
+    /// Auto-rotation at the soul beat (the manager's substitution beat): per team,
+    /// if the most-tired on-field player has dropped to the tired threshold and a
+    /// bench player is enough fresher, rotate the fresh man on. He inherits the
+    /// tired man's slot — anchors and roles — so the shape is unchanged; the tired
+    /// man goes to the bench to recover. One rotation per team per beat, so a
+    /// squad turns over gradually. Deterministic (ties break by id).
+    fn run_substitutions(&mut self, events: &mut Vec<Event>) {
+        let teams = [0u8, 1u8];
+        for team in teams {
+            // The most-tired on-field player on this team (tie-break by id).
+            let tired = self
+                .agents
+                .iter()
+                .filter(|a| a.team == team && a.on_field)
+                .min_by(|a, b| a.stamina.cmp(&b.stamina).then(a.id.cmp(&b.id)))
+                .map(|a| (a.id as usize, a.stamina));
+            // The freshest bench player on this team (tie-break by id).
+            let fresh = self
+                .agents
+                .iter()
+                .filter(|a| a.team == team && !a.on_field)
+                .max_by(|a, b| a.stamina.cmp(&b.stamina).then(b.id.cmp(&a.id)))
+                .map(|a| (a.id as usize, a.stamina));
+
+            let (Some((off, off_stam)), Some((on, on_stam))) = (tired, fresh) else {
+                continue; // no bench, or no one on the field
+            };
+            if off_stam > self.config.sub_tired_threshold
+                || on_stam - off_stam < self.config.sub_stamina_gap
+            {
+                continue; // not tired enough, or the bench isn't fresh enough to bother
+            }
+
+            // The incoming player inherits the outgoing player's slot identity.
+            let outgoing = self.agents[off].clone();
+            let incoming = &mut self.agents[on];
+            incoming.attack_role = outgoing.attack_role;
+            incoming.defend_role = outgoing.defend_role;
+            incoming.attack_anchor = outgoing.attack_anchor;
+            incoming.defend_anchor = outgoing.defend_anchor;
+            incoming.anchor = outgoing.anchor;
+            incoming.pos = outgoing.anchor;
+            incoming.target = outgoing.anchor;
+            incoming.stagger = 0;
+            incoming.on_field = true;
+            self.agents[off].on_field = false;
+
+            events.push(Event::Substitution {
+                team,
+                off: off as u32,
+                on: on as u32,
+            });
         }
     }
 
@@ -1218,6 +1297,70 @@ impl Simulation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bench reserve rotates on for a tired starter at a soul beat: over a full
+    /// match, fatigue drives at least one substitution, the fresh man comes on,
+    /// and the match still resolves. (A no-bench match never subs — pinned by the
+    /// golden hash being unchanged.)
+    fn fresh_bench_match() -> MatchSetup {
+        let mut setup = MatchSetup::default_match();
+        for team in &mut setup.teams {
+            // A fresh, durable reserve cloned from an outfielder.
+            let mut reserve = team.players[1].clone();
+            reserve.name = format!("{}-bench", team.name);
+            reserve.stamina = 100;
+            reserve.endurance = 90;
+            team.bench.push(reserve);
+        }
+        setup
+    }
+
+    #[test]
+    fn fatigue_triggers_a_substitution() {
+        let setup = fresh_bench_match();
+        let mut sim = Simulation::from_setup(&setup, 1).expect("valid");
+        let bench_ids: Vec<u32> = sim
+            .agents()
+            .iter()
+            .filter(|a| !a.on_field)
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(bench_ids.len(), 2, "one reserve per team starts benched");
+
+        let mut subs = 0;
+        let mut guard = 0;
+        while sim.winner().is_none() && guard < 500_000 {
+            for ev in sim.tick() {
+                if let Event::Substitution { on, .. } = ev {
+                    subs += 1;
+                    assert!(bench_ids.contains(&on), "a benched reserve came on");
+                }
+            }
+            guard += 1;
+        }
+        assert!(subs > 0, "fatigue should force at least one rotation");
+        assert!(sim.winner().is_some(), "the match still resolves");
+    }
+
+    #[test]
+    fn substitutions_are_deterministic() {
+        let count_subs = || {
+            let setup = fresh_bench_match();
+            let mut sim = Simulation::from_setup(&setup, 7).expect("valid");
+            let mut subs = 0;
+            let mut guard = 0;
+            while sim.winner().is_none() && guard < 500_000 {
+                subs += sim
+                    .tick()
+                    .iter()
+                    .filter(|e| matches!(e, Event::Substitution { .. }))
+                    .count();
+                guard += 1;
+            }
+            subs
+        };
+        assert_eq!(count_subs(), count_subs(), "same seed → same rotations");
+    }
 
     /// An injected [`SimConfig`] threads all the way through the match, instead
     /// of the sim silently using `default()`. Pins the item-3 seam: a league or

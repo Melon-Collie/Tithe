@@ -61,6 +61,9 @@ pub enum Event {
     /// A team banked a soul (a successful offering). `score` is the running
     /// tally `[team0, team1]` after this score.
     Scored { team: u8, score: [u32; 2] },
+    /// A substitution at a soul boundary: `on` (a fresh bench player) replaced
+    /// `off` (a tired starter) for `team`, taking his slot, anchors, and roles.
+    Substitution { team: u8, off: u32, on: u32 },
     /// The match is over — `winner` reached the soul target first.
     MatchOver { winner: u8 },
     /// The soul's position after this tick (loose, or riding its carrier).

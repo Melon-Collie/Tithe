@@ -71,7 +71,12 @@ pub struct TeamSetup {
     pub attack_formation: String,
     /// Shape used while it doesn't (enemy-held or loose; out-of-possession).
     pub defend_formation: String,
+    /// The starters, in slot order — exactly one per formation slot.
     pub players: Vec<PlayerSetup>,
+    /// Reserves who start on the bench and can be rotated on at a soul boundary
+    /// (the §1 "round" beat). Empty for a no-bench match (behaviour unchanged).
+    #[serde(default)]
+    pub bench: Vec<PlayerSetup>,
 }
 
 /// One authored player. Attributes are integer percentiles `0..=100`
@@ -95,6 +100,16 @@ pub struct PlayerSetup {
     pub pace: u8,
     pub awareness: u8,
     pub endurance: u8,
+    /// Stamina he arrives with, as a percent `0..=100` (100 = fresh). Lets the
+    /// management layer carry fatigue between matches; a fresh authored match
+    /// omits it (defaults to fully rested, so behaviour is unchanged).
+    #[serde(default = "full_stamina")]
+    pub stamina: u8,
+}
+
+/// Default arrival stamina (fully rested) when a setup doesn't specify one.
+fn full_stamina() -> u8 {
+    100
 }
 
 impl PlayerSetup {
@@ -212,37 +227,69 @@ pub fn build_agents(setup: &MatchSetup) -> Result<Vec<Agent>, SetupError> {
         return Err(SetupError::WrongTeamCount(setup.teams.len()));
     }
     let mut agents = Vec::new();
+    let hex_size = SimConfig::default().hex_size;
     for (team_idx, team) in setup.teams.iter().enumerate() {
         let attack = lookup_formation(setup, team, &team.attack_formation)?;
         let defend = lookup_formation(setup, team, &team.defend_formation)?;
         check_slot_count(team, &team.attack_formation, attack)?;
         check_slot_count(team, &team.defend_formation, defend)?;
 
-        let hex_size = SimConfig::default().hex_size;
+        // Starters: on the field, each on his slot's phase anchors.
         for (i, player) in team.players.iter().enumerate() {
             let attack_anchor = anchor_for(team_idx, &attack.slots[i], hex_size);
             let defend_anchor = anchor_for(team_idx, &defend.slots[i], hex_size);
-            let attributes = player.to_attributes()?;
             let id = agents.len() as u32;
-            agents.push(Agent {
+            agents.push(build_agent(
                 id,
-                name: player.name.clone(),
-                team: team_idx as u8,
-                attack_role: player.attack_role,
-                defend_role: player.defend_role,
-                // Faceoff soul is loose → out-of-possession → defending shape.
-                pos: defend_anchor,
-                target: defend_anchor,
-                anchor: defend_anchor,
+                team_idx,
+                player,
                 attack_anchor,
                 defend_anchor,
-                stagger: 0,
-                stamina: Fx::from_num(1),
-                attributes,
-            });
+                true,
+            )?);
+        }
+        // Bench: off the field, placeholder anchors. A benched agent is skipped
+        // everywhere until he's rotated on, when he inherits the slot's anchors
+        // and roles — so these never get used.
+        for player in &team.bench {
+            let id = agents.len() as u32;
+            let off = Vec2::default();
+            agents.push(build_agent(id, team_idx, player, off, off, false)?);
         }
     }
     Ok(agents)
+}
+
+/// Assemble one agent from an authored [`PlayerSetup`]. Starters arrive on the
+/// field on their defending anchor (the faceoff soul is loose); the bench arrives
+/// off the field. Stamina comes from the setup (default fully rested), so the
+/// management layer can carry fatigue in between matches.
+fn build_agent(
+    id: u32,
+    team_idx: usize,
+    player: &PlayerSetup,
+    attack_anchor: Vec2,
+    defend_anchor: Vec2,
+    on_field: bool,
+) -> Result<Agent, SetupError> {
+    let attributes = player.to_attributes()?;
+    let stamina = Fx::from_num(player.stamina.min(100)) / Fx::from_num(100);
+    Ok(Agent {
+        id,
+        name: player.name.clone(),
+        team: team_idx as u8,
+        attack_role: player.attack_role,
+        defend_role: player.defend_role,
+        pos: defend_anchor,
+        target: defend_anchor,
+        anchor: defend_anchor,
+        attack_anchor,
+        defend_anchor,
+        stagger: 0,
+        stamina,
+        attributes,
+        on_field,
+    })
 }
 
 /// Look up one of a team's formations by name, or report it missing.
@@ -469,10 +516,12 @@ fn example_team(
                         pace: *pace,
                         awareness: *awareness,
                         endurance: *endurance,
+                        stamina: 100, // a fresh authored match
                     }
                 },
             )
             .collect(),
+        bench: Vec::new(),
     }
 }
 
@@ -507,6 +556,7 @@ mod tests {
             pace: Attribute::Pace as u8,
             awareness: Attribute::Awareness as u8,
             endurance: Attribute::Endurance as u8,
+            stamina: 100,
         };
         let attrs = setup.to_attributes().expect("in range");
         for a in Attribute::ALL {

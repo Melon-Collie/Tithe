@@ -262,6 +262,7 @@ fn build_team(
                 pace: g(Attribute::Pace),
                 awareness: g(Attribute::Awareness),
                 endurance: g(Attribute::Endurance),
+                stamina: 100, // a fresh authored squad
             }
         })
         .collect();
@@ -270,6 +271,7 @@ fn build_team(
         attack_formation: format!("{key}_attack"),
         defend_formation: format!("{key}_defend"),
         players: roster,
+        bench: Vec::new(),
     };
     (
         team,

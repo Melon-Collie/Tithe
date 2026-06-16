@@ -515,6 +515,9 @@ impl Career {
                     pace: r.pace,
                     awareness: r.awareness,
                     endurance: r.endurance,
+                    // Fatigue carryover is wired in the 12-man/subs management
+                    // slice; for now every match starts fresh.
+                    stamina: 100,
                 }
             })
             .collect();
@@ -524,6 +527,8 @@ impl Career {
             attack_formation: attack_name.clone(),
             defend_formation: defend_name.clone(),
             players,
+            // Benches come with the 12-man roster slice; no reserves projected yet.
+            bench: Vec::new(),
         };
         let formations = vec![
             (attack_name, club.tactics.attack_formation.clone()),
