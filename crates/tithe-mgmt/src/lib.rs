@@ -1,8 +1,9 @@
 //! # tithe-mgmt
 //!
 //! The **management layer**: the GM-coach loop that lives *around* a match.
-//! Persistent players, the clubs that hold them, and a [`Career`] that pairs
-//! clubs into matchups, hands them to the sim, and folds the results back in.
+//! Persistent players, the clubs that field them, a [`Season`] that schedules
+//! them into a round-robin and tallies a table, and a [`Career`] that holds it
+//! all — handing matchups to the sim and folding the results back in.
 //!
 //! ## The seam (load-bearing)
 //!
@@ -24,6 +25,14 @@
 //! *consumers* (CLI, web) own reading and writing save files. That keeps the
 //! save format a consumer concern and the career logic testable in isolation.
 //!
+//! ## A central player pool
+//!
+//! Players live in one pool on the [`Career`]; a [`Club`] holds only a roster of
+//! [`PlayerId`]s into it. A player on no roster is a **free agent** — the pool is
+//! what makes free agency, transfers, and drafts representable. (Their
+//! *behaviour* — signing, wages, contracts — is a later money slice; this layer
+//! just provides the shape.)
+//!
 //! ## Persistent vs. match-local identity
 //!
 //! A [`Player`] carries a stable [`PlayerId`] that lives for its whole career.
@@ -35,8 +44,14 @@
 
 pub mod career;
 pub mod club;
+pub mod development;
 pub mod player;
+pub mod scouting;
+pub mod season;
 
-pub use career::{Career, MatchRecord, MatchResult};
+pub use career::{Career, MatchRecord, MatchResult, NewPlayer};
 pub use club::{Club, Tactics};
+pub use development::{DevelopmentModel, Usage};
 pub use player::{Player, PlayerId, Ratings};
+pub use scouting::{Band, ScoutConfig, ScoutReport};
+pub use season::{Fixture, Schedule, Season, Standing};

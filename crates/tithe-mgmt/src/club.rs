@@ -1,17 +1,19 @@
-//! Clubs and their tactics. A [`Club`] is a roster of persistent [`Player`]s
-//! plus the coach's [`Tactics`]; [`Club::to_team_setup`] projects the two into
-//! the sim's input form (a [`TeamSetup`] + its named formations).
+//! Clubs and their tactics. A [`Club`] does **not** own its players — it holds a
+//! roster of [`PlayerId`]s into the career's central player pool (so a player can
+//! exist without a club: a free agent). The projection from a club to the sim's
+//! input lives on [`crate::Career`], since it needs the pool to resolve those ids.
 
-use crate::player::Player;
+use crate::player::PlayerId;
 use serde::{Deserialize, Serialize};
-use tithe_sim::setup::{FormationSpec, TeamSetup};
-use tithe_sim::{InPossessionRole as IP, OutOfPossessionRole as OP, PlayerSetup, Rng};
+use tithe_sim::setup::FormationSpec;
+use tithe_sim::{InPossessionRole as IP, OutOfPossessionRole as OP};
 
 /// The coach's two inputs made concrete (CLAUDE.md — the entire input space):
 /// the **positioning templates** (an in-possession and an out-of-possession
 /// formation) and the **role assignment** (`roles[i]` is the in/out-of-possession
-/// casting for the player in slot `i`). Player `i` fills slot `i` of both shapes,
-/// so `roles` and the roster must match the formations' slot count.
+/// casting for the player in slot `i`). The player in roster slot `i` fills slot
+/// `i` of both shapes, so `roles` and the roster must match the formations' slot
+/// count.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tactics {
     pub attack_formation: FormationSpec,
@@ -61,79 +63,12 @@ impl Tactics {
     }
 }
 
-/// A club: a display name, its roster (in slot order), and its [`Tactics`].
+/// A club: a display name, its **roster** (player ids into the career pool, in
+/// slot order), and its [`Tactics`]. The roster length must match the tactics'
+/// slot count, or a match built from it will fail to assemble.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Club {
     pub name: String,
-    pub players: Vec<Player>,
+    pub roster: Vec<PlayerId>,
     pub tactics: Tactics,
-}
-
-impl Club {
-    /// Project this club into the sim's input form: a [`TeamSetup`] (referencing
-    /// its formations by `{key}_attack` / `{key}_defend`) and the two named
-    /// [`FormationSpec`]s the caller must register in the [`MatchSetup`]. `key`
-    /// namespaces the formations so two clubs' shapes can't collide in the shared
-    /// formation library.
-    ///
-    /// [`MatchSetup`]: tithe_sim::MatchSetup
-    pub fn to_team_setup(&self, key: &str) -> (TeamSetup, Vec<(String, FormationSpec)>) {
-        let attack_name = format!("{key}_attack");
-        let defend_name = format!("{key}_defend");
-
-        let players = self
-            .players
-            .iter()
-            .zip(&self.tactics.roles)
-            .map(|(p, &(attack_role, defend_role))| {
-                let r = &p.ratings;
-                PlayerSetup {
-                    name: p.name.clone(),
-                    attack_role,
-                    defend_role,
-                    accuracy: r.accuracy,
-                    range: r.range,
-                    handling: r.handling,
-                    stripping: r.stripping,
-                    contesting: r.contesting,
-                    passing: r.passing,
-                    positioning: r.positioning,
-                    pace: r.pace,
-                    awareness: r.awareness,
-                    endurance: r.endurance,
-                }
-            })
-            .collect();
-
-        let team = TeamSetup {
-            name: self.name.clone(),
-            attack_formation: attack_name.clone(),
-            defend_formation: defend_name.clone(),
-            players,
-        };
-        let formations = vec![
-            (attack_name, self.tactics.attack_formation.clone()),
-            (defend_name, self.tactics.defend_formation.clone()),
-        ];
-        (team, formations)
-    }
-}
-
-/// Generate a seven-a-side club: seven players with ids drawn from the shared
-/// `next_id` counter (so ids stay globally unique across the career), and the
-/// default tactics. Deterministic from the threaded [`Rng`].
-pub(crate) fn generate_club(name: &str, prefix: char, next_id: &mut u32, rng: &mut Rng) -> Club {
-    use crate::player::PlayerId;
-    let players = (0..7)
-        .map(|i| {
-            let id = PlayerId(*next_id);
-            *next_id += 1;
-            Player::generate(id, &format!("{prefix}{}", i + 1), rng)
-        })
-        .collect();
-    Club {
-        name: name.to_string(),
-        players,
-        tactics: Tactics::default_seven(),
-    }
 }
