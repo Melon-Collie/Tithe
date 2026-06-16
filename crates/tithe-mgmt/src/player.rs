@@ -3,6 +3,7 @@
 //! from it at matchup time (see [`crate::club::Club::to_team_setup`]).
 
 use crate::development::Usage;
+use crate::finance::Contract;
 use serde::{Deserialize, Serialize};
 use tithe_sim::{Attribute, Rng};
 
@@ -122,6 +123,10 @@ pub struct Player {
     /// player has been seen, the tighter his scouted bands (design doc §3, the
     /// exposure dial). See [`crate::scouting`].
     pub appearances: u32,
+    /// His [`Contract`] if he's signed to a club, or `None` if he's a free agent.
+    /// A roster move (sign/release) is the only thing that changes it; generation
+    /// makes an unsigned player and the club that rosters him gives him a deal.
+    pub contract: Option<Contract>,
 }
 
 /// A generated player's assumed matches-per-year before the career starts, so a
@@ -149,6 +154,7 @@ impl Player {
             age: 18,
             season_usage: Usage::default(),
             appearances: 0,
+            contract: None, // unsigned until a club rosters him
         };
         // No match history when synthesizing a career — uniform growth toward the
         // ceiling, so a generated veteran is a coherent aged-up youngster.

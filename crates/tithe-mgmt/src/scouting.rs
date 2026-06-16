@@ -193,6 +193,7 @@ mod tests {
             development_risk: risk,
             season_usage: Usage::default(),
             appearances,
+            contract: None,
         }
     }
 

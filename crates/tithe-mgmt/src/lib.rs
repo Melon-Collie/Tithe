@@ -45,6 +45,7 @@
 pub mod career;
 pub mod club;
 pub mod development;
+pub mod finance;
 pub mod player;
 pub mod scouting;
 pub mod season;
@@ -52,6 +53,7 @@ pub mod season;
 pub use career::{Career, MatchRecord, MatchResult, NewPlayer};
 pub use club::{Club, Tactics};
 pub use development::{DevelopmentModel, Usage};
+pub use finance::{Contract, FinanceError};
 pub use player::{Player, PlayerId, Ratings};
 pub use scouting::{Band, ScoutConfig, ScoutReport};
 pub use season::{Fixture, Schedule, Season, Standing};

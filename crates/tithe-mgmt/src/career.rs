@@ -15,6 +15,10 @@
 
 use crate::club::{Club, Tactics};
 use crate::development::DevelopmentModel;
+use crate::finance::{
+    wage_for, Contract, FinanceError, DEFAULT_SALARY_CAP, DEFAULT_SALARY_FLOOR,
+    MAX_DEVELOPMENT_BOOST,
+};
 use crate::player::{Player, PlayerId, Ratings};
 use crate::scouting::{ScoutConfig, ScoutReport};
 use crate::season::{Schedule, Season, Standing};
@@ -68,6 +72,13 @@ pub struct Career {
     ///
     /// [`advance_season`]: Career::advance_season
     seasons_advanced: u32,
+    /// League hard salary cap — a club's payroll may never exceed it (design doc
+    /// §7). Flat and league-wide.
+    pub salary_cap: u32,
+    /// League salary floor — clubs are meant to spend at least this (so tanking
+    /// for development budget isn't degenerate). Not hard-enforced on existing
+    /// rosters; it's a constraint the GM (later, the AI) manages.
+    pub salary_floor: u32,
 }
 
 /// A player to add to the pool — everything but the id, which the career mints so
@@ -115,6 +126,8 @@ impl Career {
             history: Vec::new(),
             season: None,
             seasons_advanced: 0,
+            salary_cap: DEFAULT_SALARY_CAP,
+            salary_floor: DEFAULT_SALARY_FLOOR,
         }
     }
 
@@ -140,7 +153,10 @@ impl Career {
         let mut roster = Vec::with_capacity(SEVEN_A_SIDE);
         for i in 0..SEVEN_A_SIDE {
             let id = self.mint_id();
-            let player = Player::generate(id, &format!("{prefix}{}", i + 1), &mut rng);
+            let mut player = Player::generate(id, &format!("{prefix}{}", i + 1), &mut rng);
+            // Rostering signs him: a market wage for his ability, a 1–4 year term.
+            let wage = wage_for(player.ratings.overall());
+            player.contract = Some(Contract::new(wage, 1 + rng.below(4) as u8));
             self.players.push(player);
             roster.push(id);
         }
@@ -199,12 +215,14 @@ impl Career {
             id,
             name: p.name,
             age: p.age,
-            potential: p.ratings.clone(),
-            ratings: p.ratings,
             development_risk: 0,
             season_usage: crate::development::Usage::default(),
             // A plausible pre-career history for his age, so he reads as scouted.
             appearances: (p.age.saturating_sub(18)) as u32 * 12,
+            // Rostered authored players are signed at a market wage, 3-year term.
+            contract: Some(Contract::new(wage_for(p.ratings.overall()), 3)),
+            potential: p.ratings.clone(),
+            ratings: p.ratings,
         });
         id
     }
@@ -295,6 +313,85 @@ impl Career {
         ScoutConfig::default().scout(self.player(id), self.seed)
     }
 
+    /// A club's total wage bill — the sum of its rostered players' contracts.
+    pub fn payroll(&self, club: usize) -> u32 {
+        self.clubs[club]
+            .roster
+            .iter()
+            .filter_map(|&id| self.player(id).contract.as_ref())
+            .map(|c| c.wage)
+            .sum()
+    }
+
+    /// A club's **development budget** — the unspent cap (`cap − payroll`). The
+    /// single economic lever (§7): the more of its cap a club leaves on wages
+    /// unspent, the faster it develops its players (see [`advance_season`]).
+    ///
+    /// [`advance_season`]: Career::advance_season
+    pub fn development_budget(&self, club: usize) -> u32 {
+        self.salary_cap.saturating_sub(self.payroll(club))
+    }
+
+    /// Sign a free agent to a club at `wage` for `years`, filling an open roster
+    /// slot. Fails if he's already under contract, the roster is full, or the wage
+    /// would push the club over the hard cap. (The cap is enforced here; *who* to
+    /// sign at *what* wage is the GM's call — the AI making that call comes later.)
+    pub fn sign(
+        &mut self,
+        club: usize,
+        player: PlayerId,
+        wage: u32,
+        years: u8,
+    ) -> Result<(), FinanceError> {
+        if self.player(player).contract.is_some()
+            || self.clubs.iter().any(|c| c.roster.contains(&player))
+        {
+            return Err(FinanceError::NotAFreeAgent);
+        }
+        if self.clubs[club].roster.len() >= SEVEN_A_SIDE {
+            return Err(FinanceError::RosterFull);
+        }
+        let new_payroll = self.payroll(club) + wage;
+        if new_payroll > self.salary_cap {
+            return Err(FinanceError::OverCap {
+                payroll: new_payroll,
+                cap: self.salary_cap,
+            });
+        }
+        self.player_mut(player).contract = Some(Contract::new(wage, years));
+        self.clubs[club].roster.push(player);
+        Ok(())
+    }
+
+    /// Release a rostered player to free agency: drop him from the roster and clear
+    /// his contract. Fails if he isn't on that club.
+    pub fn release(&mut self, club: usize, player: PlayerId) -> Result<(), FinanceError> {
+        let pos = self.clubs[club]
+            .roster
+            .iter()
+            .position(|&id| id == player)
+            .ok_or(FinanceError::NotOnRoster)?;
+        self.clubs[club].roster.remove(pos);
+        self.player_mut(player).contract = None;
+        Ok(())
+    }
+
+    /// A club's development growth multiplier (percent, ≥100) bought by its unspent
+    /// cap — the lever made concrete: budget `0` → `100` (no boost), a full unspent
+    /// cap → `100 + MAX_DEVELOPMENT_BOOST`.
+    fn development_funding(&self, club: usize) -> u32 {
+        let budget = self.development_budget(club);
+        100 + budget.saturating_mul(MAX_DEVELOPMENT_BOOST) / self.salary_cap.max(1)
+    }
+
+    /// Mutable pool lookup by id (for roster moves). Panics if the id isn't pooled.
+    fn player_mut(&mut self, id: PlayerId) -> &mut Player {
+        self.players
+            .iter_mut()
+            .find(|p| p.id == id)
+            .expect("player id belongs to this career's pool")
+    }
+
     /// Play out the rest of the active season's fixtures, in schedule order.
     pub fn play_season(&mut self) {
         while self.play_next_fixture().is_some() {}
@@ -309,16 +406,35 @@ impl Career {
     /// independent of pool order. Does not touch the match schedule — call it when
     /// a season ends to roll the league forward.
     pub fn advance_season(&mut self) {
-        let model = DevelopmentModel::default();
+        let base = DevelopmentModel::default();
         let year_seed = derive_seed(
             self.seed ^ DEVELOPMENT_SEED_SALT,
             self.seasons_advanced as u64,
         );
+        // The economic lever: each club's unspent cap funds faster development.
+        // Compute funding and the player→club map before the mutable pass.
+        let club_funding: Vec<u32> = (0..self.clubs.len())
+            .map(|c| self.development_funding(c))
+            .collect();
+        let mut club_of: BTreeMap<PlayerId, usize> = BTreeMap::new();
+        for (ci, club) in self.clubs.iter().enumerate() {
+            for &id in &club.roster {
+                club_of.insert(id, ci);
+            }
+        }
         for player in &mut self.players {
+            // A funded club grows its players faster; free agents grow at baseline.
+            let funding = club_of.get(&player.id).map_or(100, |&c| club_funding[c]);
+            let mut model = base.clone();
+            model.growth_rate = base.growth_rate * funding / 100;
             // Take the season's deployment record (resetting it for next season).
             let usage = std::mem::take(&mut player.season_usage);
             let mut rng = Rng::new(derive_seed(year_seed, player.id.0 as u64));
             model.advance(player, &usage, &mut rng);
+            // A season ticks off any contract (no auto-release — expiry is a flag).
+            if let Some(c) = &mut player.contract {
+                c.years_remaining = c.years_remaining.saturating_sub(1);
+            }
         }
         self.seasons_advanced += 1;
     }
@@ -703,5 +819,80 @@ mod tests {
             exhibition, fixture,
             "the season fixture advances past the exhibition"
         );
+    }
+
+    #[test]
+    fn payroll_and_budget_track_wages() {
+        let career = Career::demo(1);
+        let pay = career.payroll(0);
+        assert!(pay > 0, "a generated roster has wages");
+        assert_eq!(
+            career.development_budget(0),
+            career.salary_cap.saturating_sub(pay)
+        );
+    }
+
+    #[test]
+    fn release_then_sign_moves_a_player_between_pool_and_roster() {
+        let mut career = Career::demo(1);
+        let victim = career.clubs[0].roster[6];
+        career.release(0, victim).expect("on roster");
+        assert_eq!(career.clubs[0].roster.len(), 6);
+        assert!(career.player(victim).contract.is_none());
+        assert!(career.free_agents().iter().any(|p| p.id == victim));
+
+        career.sign(0, victim, 10, 2).expect("under cap, open slot");
+        assert_eq!(career.clubs[0].roster.len(), 7);
+        assert_eq!(career.player(victim).contract.as_ref().unwrap().wage, 10);
+    }
+
+    #[test]
+    fn signing_is_rejected_over_cap_full_roster_or_when_contracted() {
+        let mut career = Career::demo(1);
+        // A full roster can't take anyone.
+        career.add_free_agents(1);
+        let fa = career.free_agents()[0].id;
+        assert_eq!(career.sign(0, fa, 10, 2), Err(FinanceError::RosterFull));
+
+        // A contracted player isn't a free agent.
+        let owned = career.clubs[1].roster[0];
+        assert_eq!(
+            career.sign(0, owned, 10, 2),
+            Err(FinanceError::NotAFreeAgent)
+        );
+
+        // Over the hard cap is refused (open a slot first, then overpay).
+        let victim = career.clubs[0].roster[6];
+        career.release(0, victim).unwrap();
+        let huge = career.salary_cap + 1;
+        assert!(matches!(
+            career.sign(0, fa, huge, 2),
+            Err(FinanceError::OverCap { .. })
+        ));
+    }
+
+    #[test]
+    fn unspent_cap_funds_faster_development() {
+        // The lever's direction: lower payroll → more budget → higher funding.
+        let mut career = Career::demo(1);
+        let before = career.development_funding(0);
+        let victim = career.clubs[0].roster[6];
+        career.release(0, victim).unwrap();
+        let after = career.development_funding(0);
+        assert!(
+            after >= before,
+            "lower payroll never reduces development funding"
+        );
+        assert!(after > 100, "an under-cap roster develops above baseline");
+    }
+
+    #[test]
+    fn advancing_a_season_ticks_contracts_down() {
+        let mut career = Career::demo(1);
+        let id = career.clubs[0].roster[0];
+        let before = career.player(id).contract.as_ref().unwrap().years_remaining;
+        career.advance_season();
+        let after = career.player(id).contract.as_ref().unwrap().years_remaining;
+        assert_eq!(after, before.saturating_sub(1));
     }
 }
