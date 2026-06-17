@@ -130,6 +130,11 @@ pub struct Player {
     /// A roster move (sign/release) is the only thing that changes it; generation
     /// makes an unsigned player and the club that rosters him gives him a deal.
     pub contract: Option<Contract>,
+    /// His carried stamina (`0..=100`, 100 = fresh) — his condition as of his last
+    /// match's end. Matches drain it; rest between matches restores it. This is
+    /// what makes a deep 12-man squad matter: ride your starters and they wear
+    /// down across a season; rotate and they stay fresh (design doc §6 fatigue).
+    pub stamina: u8,
 }
 
 /// A generated player's assumed matches-per-year before the career starts, so a
@@ -158,6 +163,7 @@ impl Player {
             season_usage: Usage::default(),
             appearances: 0,
             contract: None, // unsigned until a club rosters him
+            stamina: 100,   // generated fresh
         };
         // No match history when synthesizing a career — uniform growth toward the
         // ceiling, so a generated veteran is a coherent aged-up youngster.

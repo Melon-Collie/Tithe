@@ -25,7 +25,10 @@ use crate::season::{Schedule, Season, Standing};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use tithe_sim::setup::{FormationSpec, TeamSetup};
-use tithe_sim::{BoxScore, Event, MatchSetup, PlayerSetup, Rng, Simulation};
+use tithe_sim::{
+    BoxScore, Event, Fx, InPossessionRole, MatchSetup, OutOfPossessionRole, PlayerSetup, Rng,
+    Simulation,
+};
 
 /// A safety bound so a pathological match can't loop forever. Real matches finish
 /// far short of this (first-to-X souls); hitting it means the match never
@@ -38,9 +41,21 @@ const CLUB_SEED_SALT: u64 = 0xC1AB_5EED_C1AB_5EED;
 const FREE_AGENT_SEED_SALT: u64 = 0xF4EE_A9E7_F4EE_A9E7;
 const DEVELOPMENT_SEED_SALT: u64 = 0xDE7E_109D_DE7E_109D;
 
-/// The number of players in a generated club. The default tactics are seven-a-side
-/// (design doc's initial team size), so generated rosters match that shape.
-const SEVEN_A_SIDE: usize = 7;
+/// The starting lineup size — players on the field at once. The default tactics
+/// are seven-a-side (design doc's initial team size), so this is the slot count.
+const LINEUP_SIZE: usize = 7;
+
+/// A full squad: the seven starters plus a five-man bench to rotate through as
+/// they tire. A club may carry up to this many players under the cap.
+const ROSTER_SIZE: usize = 12;
+
+/// Between-match stamina recovery at Endurance 0 (percentage points). Rest
+/// restores a lot — a normal game's drain is mostly slept off — so it's heavy
+/// *minutes* across a season, not a single match, that wears a player down.
+const REST_RECOVERY_BASE: u32 = 40;
+/// Extra between-match recovery at Endurance 100 (added on top of the base, so an
+/// engine comes back fresher than a low-Endurance grinder).
+const REST_RECOVERY_GAIN: u32 = 40;
 
 /// The persistent state of a save: the seed (the career is reproducible from it),
 /// the next player id to mint, the **player pool**, the league's clubs, and the
@@ -110,6 +125,10 @@ pub struct MatchRecord {
 pub struct MatchResult {
     pub record: MatchRecord,
     pub box_score: BoxScore,
+    /// Each squad member's stamina (`0..=100`) at the final whistle, in agent
+    /// order (home squad then away, starters then bench). The career carries this
+    /// back onto the players so fatigue persists between matches.
+    pub end_stamina: Vec<u8>,
 }
 
 impl Career {
@@ -141,17 +160,19 @@ impl Career {
         career
     }
 
-    /// Add a seven-a-side club with a generated roster and the default tactics,
-    /// returning its index in [`clubs`](Career::clubs). The roster derives from the
-    /// career seed and the club's index, so the league is reproducible and a club's
-    /// players don't depend on what was added before it.
+    /// Add a club with a full generated squad (seven starters + a five-man bench)
+    /// and the default tactics, returning its index in [`clubs`](Career::clubs).
+    /// The roster derives from the career seed and the club's index, so the league
+    /// is reproducible and a club's players don't depend on what was added before
+    /// it. The first [`LINEUP_SIZE`] players are the starters (slot order), the
+    /// rest the bench.
     pub fn add_generated_club(&mut self, name: &str) -> usize {
         let club_index = self.clubs.len();
         let mut rng = Rng::new(derive_seed(self.seed ^ CLUB_SEED_SALT, club_index as u64));
         let prefix = name.chars().next().unwrap_or('P').to_ascii_uppercase();
 
-        let mut roster = Vec::with_capacity(SEVEN_A_SIDE);
-        for i in 0..SEVEN_A_SIDE {
+        let mut roster = Vec::with_capacity(ROSTER_SIZE);
+        for i in 0..ROSTER_SIZE {
             let id = self.mint_id();
             let mut player = Player::generate(id, &format!("{prefix}{}", i + 1), &mut rng);
             // Rostering signs him: a market wage for his ability, a 1–4 year term.
@@ -221,6 +242,7 @@ impl Career {
             appearances: (p.age.saturating_sub(18)) as u32 * 12,
             // Rostered authored players are signed at a market wage, 3-year term.
             contract: Some(Contract::new(wage_for(p.ratings.overall()), 3)),
+            stamina: 100, // authored fresh
             potential: p.ratings.clone(),
             ratings: p.ratings,
         });
@@ -263,7 +285,7 @@ impl Career {
     /// (same seed, same matches in the same order) reproduces every result.
     pub fn play(&mut self, home: usize, away: usize) -> MatchResult {
         let result = self.play_fixture(home, away);
-        self.accumulate_usage(home, away, &result.box_score);
+        self.absorb_result(home, away, &result);
         self.history.push(result.record.clone());
         result
     }
@@ -281,7 +303,7 @@ impl Career {
     pub fn play_next_fixture(&mut self) -> Option<MatchResult> {
         let fixture = self.season.as_ref()?.next_fixture()?;
         let result = self.play_fixture(fixture.home, fixture.away);
-        self.accumulate_usage(fixture.home, fixture.away, &result.box_score);
+        self.absorb_result(fixture.home, fixture.away, &result);
         self.season
             .as_mut()
             .expect("season present")
@@ -289,16 +311,47 @@ impl Career {
         Some(result)
     }
 
+    /// Fold a played match back onto the squad: carry each player's end-of-match
+    /// stamina (so fatigue persists) and accumulate his usage. Agent order is the
+    /// home squad then the away squad, each starters (slot order) then bench —
+    /// which is exactly `home.roster ++ away.roster`.
+    fn absorb_result(&mut self, home: usize, away: usize, result: &MatchResult) {
+        let squad: Vec<PlayerId> = self.clubs[home]
+            .roster
+            .iter()
+            .chain(&self.clubs[away].roster)
+            .copied()
+            .collect();
+        for (&id, &stamina) in squad.iter().zip(&result.end_stamina) {
+            self.player_mut(id).stamina = stamina;
+        }
+        self.accumulate_usage(home, away, &result.box_score);
+    }
+
     /// Fold a played match's box score into the involved players' season usage, so
     /// [`advance_season`](Career::advance_season) can bias each player's growth
     /// toward what he actually did. Agent ids run the home roster then the away
     /// roster (team-0-first, the projection's ordering).
     fn accumulate_usage(&mut self, home: usize, away: usize, box_score: &BoxScore) {
-        let mut roster_ids: Vec<PlayerId> = Vec::with_capacity(box_score.players.len());
-        roster_ids.extend(self.clubs[home].roster.iter().copied());
-        roster_ids.extend(self.clubs[away].roster.iter().copied());
-        for (id, line) in roster_ids.iter().zip(&box_score.players) {
-            if let Some(player) = self.players.iter_mut().find(|p| p.id == *id) {
+        // (player id, is_starter) in agent order: each club's roster, first
+        // LINEUP_SIZE are the starters, the rest the bench.
+        let labelled = |club: usize| {
+            self.clubs[club]
+                .roster
+                .iter()
+                .enumerate()
+                .map(move |(i, &id)| (id, i < LINEUP_SIZE))
+        };
+        let squad: Vec<(PlayerId, bool)> = labelled(home).chain(labelled(away)).collect();
+
+        for ((id, is_starter), line) in squad.into_iter().zip(&box_score.players) {
+            // A starter always featured; a reserve only counts if he actually got
+            // on (left a mark in the box score) — a bench-warmer isn't "seen".
+            let played = is_starter || line_has_activity(line);
+            if !played {
+                continue;
+            }
+            if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
                 player.season_usage.add_line(line);
                 player.appearances += 1; // exposure → tighter scouting
             }
@@ -348,7 +401,7 @@ impl Career {
         {
             return Err(FinanceError::NotAFreeAgent);
         }
-        if self.clubs[club].roster.len() >= SEVEN_A_SIDE {
+        if self.clubs[club].roster.len() >= ROSTER_SIZE {
             return Err(FinanceError::RosterFull);
         }
         let new_payroll = self.payroll(club) + wage;
@@ -494,31 +547,29 @@ impl Career {
         let attack_name = format!("{key}_attack");
         let defend_name = format!("{key}_defend");
 
+        // Roster order is the lineup: the first LINEUP_SIZE start (slot-aligned to
+        // the tactics' roles); the rest begin on the bench and the sim rotates
+        // them on as starters tire (they inherit a slot's roles on the way in).
         let players = club
             .roster
             .iter()
+            .take(LINEUP_SIZE)
             .zip(&club.tactics.roles)
             .map(|(&id, &(attack_role, defend_role))| {
-                let p = self.player(id);
-                let r = &p.ratings;
-                PlayerSetup {
-                    name: p.name.clone(),
-                    attack_role,
-                    defend_role,
-                    accuracy: r.accuracy,
-                    range: r.range,
-                    handling: r.handling,
-                    stripping: r.stripping,
-                    contesting: r.contesting,
-                    passing: r.passing,
-                    positioning: r.positioning,
-                    pace: r.pace,
-                    awareness: r.awareness,
-                    endurance: r.endurance,
-                    // Fatigue carryover is wired in the 12-man/subs management
-                    // slice; for now every match starts fresh.
-                    stamina: 100,
-                }
+                self.player_setup(id, attack_role, defend_role)
+            })
+            .collect();
+        let bench = club
+            .roster
+            .iter()
+            .skip(LINEUP_SIZE)
+            .map(|&id| {
+                // Placeholder roles — a reserve takes the slot's on substitution.
+                self.player_setup(
+                    id,
+                    InPossessionRole::default(),
+                    OutOfPossessionRole::default(),
+                )
             })
             .collect();
 
@@ -527,14 +578,45 @@ impl Career {
             attack_formation: attack_name.clone(),
             defend_formation: defend_name.clone(),
             players,
-            // Benches come with the 12-man roster slice; no reserves projected yet.
-            bench: Vec::new(),
+            bench,
         };
         let formations = vec![
             (attack_name, club.tactics.attack_formation.clone()),
             (defend_name, club.tactics.defend_formation.clone()),
         ];
         (team, formations)
+    }
+
+    /// Build the sim input for one pooled player, feeding his **rested** stamina:
+    /// his carried stamina plus an Endurance-scaled between-match recovery. So a
+    /// player arrives fresher the better he's rested and the more durable he is,
+    /// and heavy minutes across a season are what grind him down.
+    fn player_setup(
+        &self,
+        id: PlayerId,
+        attack_role: InPossessionRole,
+        defend_role: OutOfPossessionRole,
+    ) -> PlayerSetup {
+        let p = self.player(id);
+        let r = &p.ratings;
+        let rest = REST_RECOVERY_BASE + REST_RECOVERY_GAIN * r.endurance as u32 / 100;
+        let stamina = (p.stamina as u32 + rest).min(100) as u8;
+        PlayerSetup {
+            name: p.name.clone(),
+            attack_role,
+            defend_role,
+            accuracy: r.accuracy,
+            range: r.range,
+            handling: r.handling,
+            stripping: r.stripping,
+            contesting: r.contesting,
+            passing: r.passing,
+            positioning: r.positioning,
+            pace: r.pace,
+            awareness: r.awareness,
+            endurance: r.endurance,
+            stamina,
+        }
     }
 }
 
@@ -553,6 +635,12 @@ fn play_setup(setup: &MatchSetup, seed: u64, home: usize, away: usize) -> MatchR
     }
 
     let box_score = BoxScore::from_events(&events, num_agents);
+    // Each agent's condition at the whistle (Fx 0..1 → 0..=100), for carryover.
+    let end_stamina: Vec<u8> = sim
+        .agents()
+        .iter()
+        .map(|a| (a.stamina * Fx::from_num(100)).to_num::<u8>())
+        .collect();
     let record = MatchRecord {
         home,
         away,
@@ -560,7 +648,23 @@ fn play_setup(setup: &MatchSetup, seed: u64, home: usize, away: usize) -> MatchR
         score: sim.score(),
         winner: sim.winner(),
     };
-    MatchResult { record, box_score }
+    MatchResult {
+        record,
+        box_score,
+        end_stamina,
+    }
+}
+
+/// Whether a box-score line shows the player did anything on the field — used to
+/// tell a reserve who got on from a bench-warmer who never did.
+fn line_has_activity(line: &tithe_sim::PlayerLine) -> bool {
+    line.offerings
+        + line.passes
+        + line.strips_attempted
+        + line.interceptions
+        + line.recoveries
+        + line.strips_suffered
+        > 0
 }
 
 /// Derive a sub-seed from a base seed and an index. Runs the pair through one
@@ -584,10 +688,10 @@ mod tests {
         let jb = serde_json::to_string(&b).unwrap();
         assert_eq!(ja, jb);
         assert_eq!(a.clubs.len(), 2);
-        assert_eq!(a.players.len(), 14);
-        // Ids are globally unique across clubs (0..14 here).
+        assert_eq!(a.players.len(), 24); // two 12-man squads
+                                         // Ids are globally unique across clubs (0..24 here).
         assert_eq!(a.clubs[0].roster[0].0, 0);
-        assert_eq!(a.clubs[1].roster[0].0, 7);
+        assert_eq!(a.clubs[1].roster[0].0, 12);
     }
 
     #[test]
@@ -597,23 +701,23 @@ mod tests {
         career.add_generated_club("Wraiths");
         career.add_generated_club("Beacons");
         assert_eq!(career.clubs.len(), 3);
-        assert_eq!(career.players.len(), 21);
+        assert_eq!(career.players.len(), 36); // three 12-man squads
 
         let ids: Vec<u32> = career.players.iter().map(|p| p.id.0).collect();
-        let expected: Vec<u32> = (0..21).collect();
+        let expected: Vec<u32> = (0..36).collect();
         assert_eq!(ids, expected);
     }
 
     #[test]
     fn free_agents_are_pooled_players_on_no_roster() {
         let mut career = Career::new(4);
-        career.add_generated_club("Embers"); // 7 affiliated
+        career.add_generated_club("Embers"); // 12 affiliated
         let fas = career.add_free_agents(3); // 3 unaffiliated
-        assert_eq!(career.players.len(), 10);
+        assert_eq!(career.players.len(), 15);
 
         let free = career.free_agents();
         assert_eq!(free.len(), 3);
-        // The free agents are exactly the ids add_free_agents minted (7, 8, 9).
+        // The free agents are exactly the ids add_free_agents minted (12, 13, 14).
         let free_ids: Vec<PlayerId> = free.iter().map(|p| p.id).collect();
         assert_eq!(free_ids, fas);
     }
@@ -630,7 +734,7 @@ mod tests {
         b.add_generated_club("Other");
         b.add_generated_club("Embers");
 
-        // Both "Embers" sit at index 1 → identical rosters (ids 7..14 too).
+        // Both "Embers" sit at index 1 → identical rosters (ids 12..24 too).
         let ra: Vec<_> = a.clubs[1].roster.iter().map(|&id| a.player(id)).collect();
         let rb: Vec<_> = b.clubs[1].roster.iter().map(|&id| b.player(id)).collect();
         assert_eq!(
@@ -642,7 +746,7 @@ mod tests {
     #[test]
     fn authored_club_keeps_its_ratings_and_gets_minted_ids() {
         let mut career = Career::new(0);
-        career.add_generated_club("Embers"); // ids 0..7
+        career.add_generated_club("Embers"); // ids 0..12 (a full squad)
         let sniper = NewPlayer {
             name: "Quill".to_string(),
             age: 24,
@@ -664,7 +768,7 @@ mod tests {
         let quill = career.player(quill_id);
         assert_eq!(quill.name, "Quill");
         assert_eq!(quill.ratings.accuracy, 90);
-        assert_eq!(quill_id.0, 7); // continues the global sequence after club 0
+        assert_eq!(quill_id.0, 12); // continues the global sequence after club 0
     }
 
     #[test]
@@ -677,7 +781,7 @@ mod tests {
         );
         assert_eq!(career.history.len(), 1);
         assert_eq!(career.history[0], result.record);
-        assert_eq!(result.box_score.players.len(), 14);
+        assert_eq!(result.box_score.players.len(), 24); // two 12-man squads
     }
 
     #[test]
@@ -843,12 +947,12 @@ mod tests {
         let mut career = Career::demo(1);
         let victim = career.clubs[0].roster[6];
         career.release(0, victim).expect("on roster");
-        assert_eq!(career.clubs[0].roster.len(), 6);
+        assert_eq!(career.clubs[0].roster.len(), 11); // a 12-man squad, minus one
         assert!(career.player(victim).contract.is_none());
         assert!(career.free_agents().iter().any(|p| p.id == victim));
 
         career.sign(0, victim, 10, 2).expect("under cap, open slot");
-        assert_eq!(career.clubs[0].roster.len(), 7);
+        assert_eq!(career.clubs[0].roster.len(), 12);
         assert_eq!(career.player(victim).contract.as_ref().unwrap().wage, 10);
     }
 
@@ -900,5 +1004,52 @@ mod tests {
         career.advance_season();
         let after = career.player(id).contract.as_ref().unwrap().years_remaining;
         assert_eq!(after, before.saturating_sub(1));
+    }
+
+    #[test]
+    fn generated_clubs_field_a_full_twelve_man_squad() {
+        let career = Career::demo(1);
+        for club in &career.clubs {
+            assert_eq!(
+                club.roster.len(),
+                12,
+                "seven starters plus a five-man bench"
+            );
+        }
+        assert!(career.payroll(0) > 0);
+    }
+
+    #[test]
+    fn a_match_carries_fatigue_onto_the_squad() {
+        let mut career = Career::demo(1);
+        assert!(
+            career.players.iter().all(|p| p.stamina == 100),
+            "everyone starts a career fresh"
+        );
+        career.play(0, 1);
+        // After a match the squads carry fatigue — it isn't reset to fresh.
+        let drained = career.clubs[0]
+            .roster
+            .iter()
+            .any(|&id| career.player(id).stamina < 100);
+        assert!(drained, "fatigue is carried onto players after a match");
+    }
+
+    #[test]
+    fn rest_recovery_lifts_carried_stamina_into_the_match() {
+        let mut career = Career::demo(6);
+        // Send a starter into the match tired.
+        let id = career.clubs[0].roster[0];
+        career
+            .players
+            .iter_mut()
+            .find(|p| p.id == id)
+            .unwrap()
+            .stamina = 30;
+        let setup = career.build_match_setup(0, 1);
+        // Between-match rest lifts his arriving stamina above his carried 30.
+        let arriving = setup.teams[0].players[0].stamina;
+        assert!(arriving > 30, "rest recovers stamina before kickoff");
+        assert!(arriving <= 100);
     }
 }

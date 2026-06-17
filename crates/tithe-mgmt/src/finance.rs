@@ -11,10 +11,10 @@
 use serde::{Deserialize, Serialize};
 
 /// Default league dials (abstract money units) — an initial tuning guess, not
-/// commitments. A balanced seven-a-side roster of average players sits near the
+/// commitments. A balanced twelve-man squad of average players sits near the
 /// cap; cheaper rosters open up development budget.
-pub const DEFAULT_SALARY_CAP: u32 = 1200;
-pub const DEFAULT_SALARY_FLOOR: u32 = 700;
+pub const DEFAULT_SALARY_CAP: u32 = 2000;
+pub const DEFAULT_SALARY_FLOOR: u32 = 1100;
 
 /// Money paid per point of overall rating — the market wage scale.
 const WAGE_PER_RATING: u32 = 3;

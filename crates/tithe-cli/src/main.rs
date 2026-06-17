@@ -30,6 +30,7 @@ mod possession;
 mod replay;
 mod scout;
 mod season;
+mod squad;
 mod stats;
 mod tournament;
 mod validate;
@@ -52,6 +53,7 @@ fn main() {
         Some("develop") => develop::run(&args[2..]),
         Some("scout") => scout::run(&args[2..]),
         Some("finances") => finances::run(&args[2..]),
+        Some("squad") => squad::run(&args[2..]),
         Some("init") => init::run(&args[2..]),
         _ => {
             eprintln!("usage:");
@@ -79,6 +81,9 @@ fn main() {
             );
             eprintln!(
                 "  tithe finances   [--seed N]   # cap, payroll, and the development-budget lever"
+            );
+            eprintln!(
+                "  tithe squad      [--seed N] [--matches N]   # 12-man squad fatigue over a run"
             );
             eprintln!("  tithe init     [--out FILE]   # write an editable example setup");
             std::process::exit(2);
