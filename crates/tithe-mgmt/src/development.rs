@@ -227,6 +227,7 @@ mod tests {
             season_usage: Usage::default(),
             appearances: 0,
             contract: None,
+            stamina: 100,
         };
         let start = p.ratings.overall();
         for _ in 0..6 {
@@ -255,6 +256,7 @@ mod tests {
             season_usage: Usage::default(),
             appearances: 0,
             contract: None,
+            stamina: 100,
         };
         for _ in 0..5 {
             model.advance(&mut p, &Usage::uniform(), &mut Rng::new(1));
@@ -283,6 +285,7 @@ mod tests {
             season_usage: Usage::default(),
             appearances: 0,
             contract: None,
+            stamina: 100,
         };
         model.advance(&mut p, &Usage::uniform(), &mut Rng::new(42));
         assert_eq!(p.ratings, level, "no change at exactly the peak age");
@@ -304,6 +307,7 @@ mod tests {
             season_usage: Usage::default(),
             appearances: 0,
             contract: None,
+            stamina: 100,
         };
         let mut a = make();
         let mut b = make();
@@ -329,6 +333,7 @@ mod tests {
             season_usage: Usage::default(),
             appearances: 0,
             contract: None,
+            stamina: 100,
         };
 
         // A season of nothing but offerings (exercises shooting, not passing).

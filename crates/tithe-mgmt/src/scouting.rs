@@ -194,6 +194,7 @@ mod tests {
             season_usage: Usage::default(),
             appearances,
             contract: None,
+            stamina: 100,
         }
     }
 
